@@ -167,11 +167,11 @@ func inspectPdf(inputPath string, opt cmdOptions) error {
 				v := fmt.Sprintf("%s", foo.Get("Name"))
 				if strings.Compare(v, "Comment") == 0 {
 					fmt.Println("=========================================================")
-					fmt.Println(foo.Get("Contents"))
+					fmt.Printf("%s:%s\n", foo.Get("T"), foo.Get("Contents"))
 					fmt.Println(foo.Get("Rect"))
-					//for _, k := range foo.Keys() {
-					//	fmt.Printf("%s:%s\n", k, foo.Get(k))
-					//}
+					for _, k := range foo.Keys() {
+						fmt.Printf("%s:%s\n", k, foo.Get(k))
+					}
 				}
 				//	fmt.Println(v)
 
