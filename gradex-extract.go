@@ -60,16 +60,23 @@ func main() {
 	//results := []ScanResult{}
 	var opt cmdOptions
 
-	//files
+	files := make(map[string]map[int]string) //map of source files, by batch file + page
 
+	// iterate over the files in our list
 	for _, inputPath := range inputPaths {
 
+		// find out what original file each page came from
+		// for now - we assume one text per page, and one page per file
+		// because this is for interpreting montage output, only, at the moment
 		texts, err := getText(inputPath, opt)
 		if err == nil {
-			fmt.Println(texts)
+			//fmt.Println(texts)
+			files[inputPath] = texts
 		}
 
 	}
+
+	fmt.Println(files)
 
 	/*fieldName := ""
 	if len(os.Args) >= 3 {
