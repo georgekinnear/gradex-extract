@@ -11,10 +11,8 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"strings"
 
 	unicommon "github.com/unidoc/unipdf/v3/common"
-	pdfcore "github.com/unidoc/unipdf/v3/core"
 	extractor "github.com/unidoc/unipdf/v3/extractor"
 	pdf "github.com/unidoc/unipdf/v3/model"
 )
@@ -23,17 +21,57 @@ type cmdOptions struct {
 	pdfPassword string
 }
 
+type ScanResult struct {
+	ScanPerfect            bool
+	ScanRoated             bool
+	ScanContrast           bool
+	ScanFaint              bool
+	ScanIncomplete         bool
+	ScanBroken             bool
+	ScanComment1           string
+	ScanComment2           string
+	HeadingPerfect         bool
+	HeadingVerbose         bool
+	HeadingNoLine          bool
+	HeadingNoQuestion      bool
+	HeadingNoExamNumber    bool
+	HeadingAnonymityBroken bool
+	HeadingComment1        string
+	HeadingComment2        string
+	FilenamePerfect        bool
+	FilenameVerbose        bool
+	FilenameNoCourse       bool
+	FilenameNoId           bool
+	InputFile              string
+}
+
 func main() {
 	// When debugging, enable debug-level logging via console:
 	unicommon.SetLogger(unicommon.NewConsoleLogger(unicommon.LogLevelDebug))
 
 	if len(os.Args) < 2 {
-		fmt.Printf("Usage: go run pdf_forms_list_fields.go <input.pdf> [full field name]\n")
+		fmt.Printf("Usage: gradex-extract outputPath inputPaths\n")
 		os.Exit(1)
 	}
 
-	pdfPath := os.Args[1]
-	fieldName := ""
+	//csvPath := os.Args[1]
+	inputPaths := os.Args[2:]
+
+	//results := []ScanResult{}
+	var opt cmdOptions
+
+	//files
+
+	for _, inputPath := range inputPaths {
+
+		texts, err := getText(inputPath, opt)
+		if err == nil {
+			fmt.Println(texts)
+		}
+
+	}
+
+	/*fieldName := ""
 	if len(os.Args) >= 3 {
 		fieldName = os.Args[2]
 	}
@@ -51,7 +89,7 @@ func main() {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
-	}
+	}*/
 
 }
 
@@ -98,40 +136,37 @@ func printPdfFieldData(inputPath, targetFieldName string) error {
 	return nil
 }
 
-func inspectPdf(inputPath string, opt cmdOptions) error {
+func getText(inputPath string, opt cmdOptions) (map[int]string, error) {
+
+	texts := make(map[int]string)
+
 	f, err := os.Open(inputPath)
 	if err != nil {
-		return err
+		return texts, err
 	}
 	defer f.Close()
 
 	pdfReader, err := pdf.NewPdfReader(f)
 	if err != nil {
-		return err
+		return texts, err
 	}
 
 	isEncrypted, err := pdfReader.IsEncrypted()
 	if err != nil {
-		return err
+		return texts, err
 	}
 
 	// Try decrypting with an empty one.
 	if isEncrypted {
 		auth, err := pdfReader.Decrypt([]byte(opt.pdfPassword))
 		if err != nil {
-			return err
+			return texts, err
 		}
 
 		if !auth {
-			return errors.New("Unable to decrypt password protected file - need to specify pass to Decrypt")
+			return texts, errors.New("Unable to decrypt password protected file - need to specify pass to Decrypt")
 		}
 	}
-
-	numPages, err := pdfReader.GetNumPages()
-	if err != nil {
-		return err
-	}
-
 	for p, page := range pdfReader.PageList {
 
 		ex, err := extractor.New(page)
@@ -140,109 +175,12 @@ func inspectPdf(inputPath string, opt cmdOptions) error {
 
 			text, err := ex.ExtractText()
 			if err == nil {
-				fmt.Println(text)
+				texts[p] = text
 			}
 
 		}
-
-		fmt.Printf("===== PAGE %d=====\n", p)
-
-		fmt.Printf("Has filename? %v", page.HasXObjectByName("filename"))
-
-		if annotations, err := page.GetAnnotations(); err == nil {
-
-			for _, annot := range annotations {
-				//fmt.Printf("%v\n", annot)
-				fmt.Println(annot)
-			}
-
-		}
-
 	}
 
-	fmt.Printf("PDF Num Pages: %d\n", numPages)
+	return texts, nil
 
-	objNums := pdfReader.GetObjectNums()
-
-	// Output.
-	fmt.Printf("%d PDF objects:\n", len(objNums))
-	for _, objNum := range objNums {
-		obj, err := pdfReader.GetIndirectObjectByNumber(objNum)
-		if err != nil {
-			return err
-		}
-		//fmt.Printf("%3d: %d 0 %T\n", i, objNum, obj)
-		/*if stream, is := obj.(*pdfcore.PdfObjectStream); is {
-			//decoded, err := pdfcore.DecodeStream(stream)
-			if err != nil {
-				return err
-			}
-			//fmt.Printf("Decoded:\n%s\n", decoded)
-		} else
-		*/
-		if indObj, is := obj.(*pdfcore.PdfIndirectObject); is {
-
-			//fmt.Println(indObj.PdfObject.String())
-
-			/*
-				switch v := foo.Get("Name").(type) {
-				default:
-				case string:
-					fmt.Println(foo.Get("Contents"))
-				}*/
-
-			if foo, is := indObj.PdfObject.(*pdfcore.PdfObjectDictionary); is {
-
-				v := fmt.Sprintf("%s", foo.Get("Name"))
-				if strings.Compare(v, "Comment") == 0 {
-					fmt.Println("=========================================================")
-					fmt.Printf("%s:%s\n", foo.Get("T"), foo.Get("Contents"))
-					fmt.Println(foo.Get("Rect"))
-					for _, k := range foo.Keys() {
-						fmt.Printf("%s:%s\n", k, foo.Get(k))
-					}
-				}
-				//	fmt.Println(v)
-
-				/*
-					switch v := foo.Get("Name").(type) {
-									default:
-									case string:
-										if strings.Equal(v, "Contents") {
-											fmt.Println(foo.Get("Contents"))
-										}
-									}*/
-
-				//fmt.Println(foo.Get("Contents"))
-				if false {
-					for _, k := range foo.Keys() {
-						fmt.Printf("%s:%s\n", k, foo.Get(k))
-					}
-				}
-			}
-
-			//if objDict, is := obj.(*pdfcore.PdfObjectDictionary); is {
-			//	fmt.Printf("FOUND ONE: %T \n", objDict)
-			//}
-			/*
-				for _, k := range indObj.PdfObject.PdfObjectDictionary.keys {
-					fmt.Printf("%s:%s\n", k, indObj.PdfObject[k])
-				}*/
-
-			//if objDict, is := obj.(*pdfcore.PdfObjectDictionary); is {
-
-			//fmt.Printf("FOUND ONE: %T \n", indObj.PdfObject) //.PdfObjectDictionary)
-			//fmt.Printf("%T\n", indObj.PdfObject)
-
-			//fmt.Printf("%s\n", indObj.PdfObject.String())
-
-			//contents := indObj.PdfObject.String()
-
-			//}
-
-		}
-
-	}
-
-	return nil
 }
