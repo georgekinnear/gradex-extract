@@ -146,6 +146,17 @@ func main() {
 			fmt.Printf("%s p.%d->%s\n", batchfile, page, sourcefile)
 			if _, ok := organisedFields[batchfile][page]; ok {
 				organisedFields[batchfile][page]["SourceFile"] = sourcefile
+
+				// find original submission details
+				if sub, ok := submissionsByFile[sourcefile]; ok {
+					fmt.Println("Adding this to the record soon ...")
+					PrettyPrintStruct(sub)
+				} else {
+					if sub, ok := submissionsByOriginalFile[sourcefile]; ok {
+						fmt.Println("Adding this to the record soon ... (by ORIGNAL submission)")
+						PrettyPrintStruct(sub)
+					}
+				}
 				PrettyPrintStruct(organisedFields[batchfile][page])
 				fmt.Println("=========================================")
 			}
