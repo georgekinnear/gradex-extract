@@ -18,7 +18,6 @@ import (
 
 	"github.com/gocarina/gocsv"
 	"github.com/timdrysdale/parselearn"
-	unicommon "github.com/unidoc/unipdf/v3/common"
 	extractor "github.com/unidoc/unipdf/v3/extractor"
 	pdf "github.com/unidoc/unipdf/v3/model"
 )
@@ -74,7 +73,7 @@ type ScanResult struct {
 
 func main() {
 	// When debugging, enable debug-level logging via console:
-	unicommon.SetLogger(unicommon.NewConsoleLogger(unicommon.LogLevelDebug))
+	//unicommon.SetLogger(unicommon.NewConsoleLogger(unicommon.LogLevelDebug))
 
 	if len(os.Args) < 2 {
 		fmt.Printf("Usage: gradex-extract outputPath inputPaths\n")
@@ -152,8 +151,6 @@ func main() {
 	// we go by batchfile, and page, same in both maps, unless corrupt files
 	// so either or ...
 	for batchfile, pageToSourceFileMap := range files {
-
-		fmt.Println(batchfile)
 
 		for page, sourcefile := range pageToSourceFileMap {
 
