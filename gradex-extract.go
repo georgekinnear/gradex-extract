@@ -8,9 +8,12 @@
 package main
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
+	"strconv"
+	"strings"
 
 	unicommon "github.com/unidoc/unipdf/v3/common"
 	extractor "github.com/unidoc/unipdf/v3/extractor"
@@ -60,7 +63,7 @@ func main() {
 	//results := []ScanResult{}
 	var opt cmdOptions
 
-	files := make(map[string]map[int]string) //map of source files, by batch file + page
+	files := make(map[string]map[int]string) //map of batchfilename->page->source files
 
 	textfields := make(map[string]map[string]string) //flat key-val for whole batch file
 
@@ -83,9 +86,32 @@ func main() {
 
 	}
 
-	fmt.Println(files)
-	fmt.Println(textfields)
+	//fmt.Println(files)
+	//fmt.Println(textfields)
+	//PrettyPrintStruct(textfields)
 
+	// Now reconcile fields .... so we can assign to source file (original doc before batching)
+
+	// map batchfilename->page->key->val
+	organisedFields := make(map[string]map[int]map[string]string)
+
+	for file, fields := range textfields {
+		perFileMap := make(map[int]map[string]string)
+
+		fmt.Printf("%s: %d\n", file, len(fields))
+		for key, val := range fields {
+			p, basekey := whatPageIsThisFrom(key)
+			if _, ok := perFileMap[p]; !ok { //init map for this page if not present
+				perFileMap[p] = make(map[string]string)
+			}
+			perFileMap[p][basekey] = val
+		}
+
+		organisedFields[file] = perFileMap
+
+	}
+
+	PrettyPrintStruct(organisedFields)
 	/*fieldName := ""
 	if len(os.Args) >= 3 {
 		fieldName = os.Args[2]
@@ -105,6 +131,29 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}*/
+
+}
+
+func whatPageIsThisFrom(key string) (int, string) {
+
+	// fortunately, a rather fixed format! We get away with using prior knowledge for now
+	if strings.HasPrefix(key, "page-000-") {
+		basekey := strings.TrimPrefix(key, "page-000-")
+		return 0, basekey
+	}
+
+	tokens := strings.Split(key, ".")
+	if len(tokens) > 1 { //ignore the "docN" empty entries at the start of each page
+		pageString := strings.TrimPrefix(tokens[0], "doc")
+		pageInt, err := strconv.ParseInt(pageString, 10, 64)
+		if err != nil {
+			return -1, ""
+		}
+		basekey := strings.TrimPrefix(tokens[1], "page-000-")
+		return int(pageInt), basekey
+	}
+
+	return -1, ""
 
 }
 
@@ -238,4 +287,15 @@ func getText(inputPath string, opt cmdOptions) (map[int]string, error) {
 
 	return texts, nil
 
+}
+
+func PrettyPrintStruct(layout interface{}) error {
+
+	json, err := json.MarshalIndent(layout, "", "\t")
+	if err != nil {
+		return err
+	}
+
+	fmt.Println(string(json))
+	return nil
 }
