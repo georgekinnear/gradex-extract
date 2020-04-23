@@ -28,7 +28,7 @@ type cmdOptions struct {
 
 type ScanResult struct {
 	ScanPerfect            bool   `csv:"ScanPerfect"`
-	ScanRoated             bool   `csv:"ScanRotated"`
+	ScanRotated            bool   `csv:"ScanRotated"`
 	ScanContrast           bool   `csv:"ScanContrast"`
 	ScanFaint              bool   `csv:"ScanFaint"`
 	ScanIncomplete         bool   `csv:"ScanIncomplete"`
@@ -103,7 +103,6 @@ func main() {
 		if strings.Compare(filepath.Ext(inputPath), ".pdf") == 0 {
 			texts, err := getText(inputPath, opt)
 			if err == nil {
-				//fmt.Println(texts)
 				files[inputPath] = texts
 			}
 
@@ -130,7 +129,6 @@ func main() {
 	for file, fields := range textfields {
 		perFileMap := make(map[int]map[string]string)
 
-		fmt.Printf("%s: %d\n", file, len(fields))
 		for key, val := range fields {
 			p, basekey := whatPageIsThisFrom(key)
 			if _, ok := perFileMap[p]; !ok { //init map for this page if not present
@@ -142,8 +140,6 @@ func main() {
 		organisedFields[file] = perFileMap
 
 	}
-
-	PrettyPrintStruct(organisedFields)
 
 	// join the two maps to make a per-source-file report on results
 	// abracadabra
@@ -169,6 +165,8 @@ func main() {
 				thisScan := ScanResult{}
 				thisScan.Submission = *submission
 
+				insertCheckReport(&thisScan, organisedFields[batchfile][page])
+
 				results = append(results, thisScan) //ScanResult{Submission: *submission})
 			}
 		}
@@ -179,6 +177,106 @@ func main() {
 		os.Exit(1)
 	}
 }
+
+func boolVal(str string) bool {
+	return strings.Compare(str, "") != 0
+}
+
+func insertCheckReport(scan *ScanResult, fields map[string]string) {
+
+	for k, v := range fields {
+		switch k {
+		case "filename-no-id":
+			scan.FilenameNoID = boolVal(v)
+		case "filename-perfect":
+			scan.FilenamePerfect = boolVal(v)
+		case "filename-verbose":
+			scan.FilenameVerbose = boolVal(v)
+		case "heading-anonymity-broken":
+			scan.HeadingAnonymityBroken = boolVal(v)
+		case "heading-comment-1":
+			scan.HeadingComment1 = v
+		case "heading-comment-2":
+			scan.HeadingComment2 = v
+		case "heading-no-exam-number":
+			scan.HeadingNoExamNumber = boolVal(v)
+		case "heading-no-line":
+			scan.HeadingNoLine = boolVal(v)
+		case "heading-no-question":
+			scan.HeadingNoQuestion = boolVal(v)
+		case "heading-perfect":
+			scan.HeadingPerfect = boolVal(v)
+		case "heading-verbose":
+			scan.HeadingVerbose = boolVal(v)
+		case "scan-broken":
+			scan.ScanBroken = boolVal(v)
+		case "scan-comment-1":
+			scan.ScanComment1 = v
+		case "scan-comment-2":
+			scan.ScanComment2 = v
+		case "scan-contrast":
+			scan.ScanContrast = boolVal(v)
+		case "scan-faint":
+			scan.ScanFaint = boolVal(v)
+		case "scan-incomplete":
+			scan.ScanIncomplete = boolVal(v)
+		case "scan-perfect":
+			scan.ScanPerfect = boolVal(v)
+		case "scan-rotated":
+			scan.ScanRotated = boolVal(v)
+		}
+
+	}
+
+}
+
+//	"filename-no-course": "x",
+//			"filename-no-id": "x",
+//			"filename-perfect": "",
+//			"filename-verbose": "x",
+//			"heading-anonymity-broken": "",
+//			"heading-comment-1": "",
+//			"heading-comment-2": "",
+//			"heading-no-exam-number": "",
+//			"heading-no-line": "",
+//			"heading-no-question": "",
+//			"heading-perfect": "x",
+//			"heading-verbose": "",
+//			"scan-broken": "",
+//			"scan-comment-1": "",
+//			"scan-comment-2": "",
+//			"scan-contrast": "",
+//			"scan-faint": "",
+//			"scan-incomplete": "",
+//			"scan-perfect": "x",
+//			"scan-rotated": ""
+//		},
+//
+//type ScanResult struct {
+//	ScanPerfect            bool   `csv:"ScanPerfect"`
+//	ScanRoated             bool   `csv:"ScanRotated"`
+//	ScanContrast           bool   `csv:"ScanContrast"`
+//	ScanFaint              bool   `csv:"ScanFaint"`
+//	ScanIncomplete         bool   `csv:"ScanIncomplete"`
+//	ScanBroken             bool   `csv:"ScanBroken"`
+//	ScanComment1           string `csv:"ScanComment1"`
+//	ScanComment2           string `csv:"ScanComment2"`
+//	HeadingPerfect         bool   `csv:"HeadingPerfect"`
+//	HeadingVerbose         bool   `csv:"HeadingVerbose"`
+//	HeadingNoLine          bool   `csv:"HeadingNoLine"`
+//	HeadingNoQuestion      bool   `csv:"HeadingNoQuestion"`
+//	HeadingNoExamNumber    bool   `csv:"HeadingNoExamNumber"`
+//	HeadingAnonymityBroken bool   `csv:"HeadingAnonymityBroken"`
+//	HeadingComment1        string `csv:"HeadingComment1"`
+//	HeadingComment2        string `csv:"HeadingComment2"`
+//	FilenamePerfect        bool   `csv:"FilenamePerfect"`
+//	FilenameVerbose        bool   `csv:"FilenameVerbose"`
+//	FilenameNoCourse       bool   `csv:"FilenameNoCourse"`
+//	FilenameNoID           bool   `csv:"FilenameNoID"`
+//	InputFile              string `csv:"InputFile"`
+//	Submission             parselearn.Submission
+//}
+//
 
 func readIngestReport(inputPath string) ([]*parselearn.Submission, error) {
 	subs := []*parselearn.Submission{}
