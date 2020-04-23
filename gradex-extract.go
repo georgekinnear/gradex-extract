@@ -15,6 +15,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/gocarina/gocsv"
+	"github.com/timdrysdale/parselearn"
 	unicommon "github.com/unidoc/unipdf/v3/common"
 	extractor "github.com/unidoc/unipdf/v3/extractor"
 	pdf "github.com/unidoc/unipdf/v3/model"
@@ -125,9 +127,11 @@ func main() {
 		for page, sourcefile := range pageToSourceFileMap {
 
 			fmt.Printf("%s p.%d->%s\n", batchfile, page, sourcefile)
-
-			PrettyPrintStruct(organisedFields[batchfile][page])
-			fmt.Println("=========================================\n")
+			if _, ok := organisedFields[batchfile][page]; ok {
+				organisedFields[batchfile][page]["SourceFile"] = sourcefile
+				PrettyPrintStruct(organisedFields[batchfile][page])
+				fmt.Println("=========================================\n")
+			}
 		}
 	}
 
@@ -151,6 +155,16 @@ func main() {
 		os.Exit(1)
 	}*/
 
+}
+
+func WriteSubmissionsToCSV(subs []parselearn.Submission, outputPath string) error {
+	// wrap the marshalling library in case we need converters etc later
+	file, err := os.OpenFile(outputPath, os.O_RDWR|os.O_CREATE, os.ModePerm)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	return gocsv.MarshalFile(&subs, file)
 }
 
 func whatPageIsThisFrom(key string) (int, string) {
