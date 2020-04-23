@@ -167,7 +167,7 @@ func main() {
 				thisScan := ScanResult{}
 				thisScan.Submission = *submission
 				thisScan.BatchFile = batchfile
-				thisScan.BatchPage = page
+				thisScan.BatchPage = page + 1 //humans often start thinking at page 1
 
 				insertCheckReport(&thisScan, organisedFields[batchfile][page])
 
@@ -192,6 +192,8 @@ func insertCheckReport(scan *ScanResult, fields map[string]string) {
 
 	for k, v := range fields {
 		switch k {
+		case "filename-no-course":
+			scan.FilenameNoCourse = boolVal(v)
 		case "filename-no-id":
 			scan.FilenameNoID = boolVal(v)
 		case "filename-perfect":
@@ -236,7 +238,7 @@ func insertCheckReport(scan *ScanResult, fields map[string]string) {
 
 }
 
-//	"filename-no-course": "x",
+//	        "filename-no-course": "x",
 //			"filename-no-id": "x",
 //			"filename-perfect": "",
 //			"filename-verbose": "x",
@@ -325,7 +327,7 @@ func whatPageIsThisFrom(key string) (int, string) {
 			return -1, ""
 		}
 		basekey := strings.TrimPrefix(tokens[1], "page-000-")
-		return int(pageInt), basekey
+		return int(pageInt) - 1, basekey //doc nums are out by 1 from our page index
 	}
 
 	return -1, ""
