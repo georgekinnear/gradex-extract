@@ -157,7 +157,6 @@ func main() {
 
 		for page, sourcefile := range pageToSourceFileMap {
 
-			//fmt.Printf("%s p.%d->%s\n", batchfile, page, sourcefile)
 			if _, ok := organisedFields[batchfile][page]; ok {
 				organisedFields[batchfile][page]["SourceFile"] = sourcefile
 
@@ -169,13 +168,15 @@ func main() {
 				} else if sub, ok := submissionsByOriginalFile[sourcefile]; ok {
 					submission = sub
 				}
-				results = append(results, ScanResult{Submission: *submission})
-				//PrettyPrintStruct(organisedFields[batchfile][page])
-				//fmt.Println("=========================================")
+
+				thisScan := ScanResult{}
+				thisScan.Submission = *submission
+
+				results = append(results, thisScan) //ScanResult{Submission: *submission})
 			}
 		}
 	}
-	err := WriteResultsToCSV(results, csvPath) //		PrettyPrintStruct(results)
+	err := WriteResultsToCSV(results, csvPath)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
