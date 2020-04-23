@@ -112,6 +112,25 @@ func main() {
 	}
 
 	PrettyPrintStruct(organisedFields)
+
+	// join the two maps to make a per-source-file report on results
+	// abracadabra
+
+	// we go by batchfile, and page, same in both maps, unless corrupt files
+	// so either or ...
+	for batchfile, pageToSourceFileMap := range files {
+
+		fmt.Println(batchfile)
+
+		for page, sourcefile := range pageToSourceFileMap {
+
+			fmt.Printf("%s p.%d->%s\n", batchfile, page, sourcefile)
+
+			PrettyPrintStruct(organisedFields[batchfile][page])
+			fmt.Println("=========================================\n")
+		}
+	}
+
 	/*fieldName := ""
 	if len(os.Args) >= 3 {
 		fieldName = os.Args[2]
