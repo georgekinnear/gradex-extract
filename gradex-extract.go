@@ -28,28 +28,49 @@ type cmdOptions struct {
 }
 
 type ScanResult struct {
-	ScanPerfect            bool
-	ScanRoated             bool
-	ScanContrast           bool
-	ScanFaint              bool
-	ScanIncomplete         bool
-	ScanBroken             bool
-	ScanComment1           string
-	ScanComment2           string
-	HeadingPerfect         bool
-	HeadingVerbose         bool
-	HeadingNoLine          bool
-	HeadingNoQuestion      bool
-	HeadingNoExamNumber    bool
-	HeadingAnonymityBroken bool
-	HeadingComment1        string
-	HeadingComment2        string
-	FilenamePerfect        bool
-	FilenameVerbose        bool
-	FilenameNoCourse       bool
-	FilenameNoId           bool
-	InputFile              string
+	ScanPerfect            bool   `csv:"ScanPerfect"`
+	ScanRoated             bool   `csv:"ScanRotated"`
+	ScanContrast           bool   `csv:"ScanContrast"`
+	ScanFaint              bool   `csv:"ScanFaint"`
+	ScanIncomplete         bool   `csv:"ScanIncomplete"`
+	ScanBroken             bool   `csv:"ScanBroken"`
+	ScanComment1           string `csv:"ScanComment1"`
+	ScanComment2           string `csv:"ScanComment2"`
+	HeadingPerfect         bool   `csv:"HeadingPerfect"`
+	HeadingVerbose         bool   `csv:"HeadingVerbose"`
+	HeadingNoLine          bool   `csv:"HeadingNoLine"`
+	HeadingNoQuestion      bool   `csv:"HeadingNoQuestion"`
+	HeadingNoExamNumber    bool   `csv:"HeadingNoExamNumber"`
+	HeadingAnonymityBroken bool   `csv:"HeadingAnonymityBroken"`
+	HeadingComment1        string `csv:"HeadingComment1"`
+	HeadingComment2        string `csv:"HeadingComment2"`
+	FilenamePerfect        bool   `csv:"FilenamePerfect"`
+	FilenameVerbose        bool   `csv:"FilenameVerbose"`
+	FilenameNoCourse       bool   `csv:"FilenameNoCourse"`
+	FilenameNoID           bool   `csv:"FilenameNoID"`
+	InputFile              string `csv:"InputFile"`
+	Submission             parselearn.Submission
 }
+
+//type Submission struct {
+//	FirstName          string  `csv:"FirstName"`
+//	LastName           string  `csv:"LastName"`
+//	Matriculation      string  `csv:"Matriculation"`
+//	Assignment         string  `csv:"Assignment"`
+//	DateSubmitted      string  `csv:"DateSubmitted"`
+//	SubmissionField    string  `csv:"SubmissionField"`
+//	Comments           string  `csv:"Comments"`
+//	OriginalFilename   string  `csv:"OriginalFilename"`
+//	Filename           string  `csv:"Filename"`
+//	ExamNumber         string  `csv:"ExamNumber"`
+//	MatriculationError string  `csv:"MatriculationError"`
+//	ExamNumberError    string  `csv:"ExamNumberError"`
+//	FiletypeError      string  `csv:"FiletypeError"`
+//	FilenameError      string  `csv:"FilenameError"`
+//	NumberOfPages      string  `csv:"NumberOfPages"`
+//	FilesizeMB         float64 `csv:"FilesizeMB"`
+//	NumberOfFiles      int     `csv:"NumberOfFiles"`
+//}
 
 func main() {
 	// When debugging, enable debug-level logging via console:
@@ -60,10 +81,10 @@ func main() {
 		os.Exit(1)
 	}
 
-	//csvPath := os.Args[1]
+	csvPath := os.Args[1]
 	inputPaths := os.Args[2:]
 
-	//results := []ScanResult{}
+	results := []ScanResult{}
 	var opt cmdOptions
 
 	files := make(map[string]map[int]string) //map of batchfilename->page->source files
@@ -98,16 +119,9 @@ func main() {
 					submissionsByFile[sub.Filename] = sub
 					submissionsByOriginalFile[sub.OriginalFilename] = sub
 				}
-
 			}
-
 		}
-
 	}
-
-	//fmt.Println(files)
-	//fmt.Println(textfields)
-	//PrettyPrintStruct(textfields)
 
 	// Now reconcile fields .... so we can assign to source file (original doc before batching)
 
@@ -143,46 +157,29 @@ func main() {
 
 		for page, sourcefile := range pageToSourceFileMap {
 
-			fmt.Printf("%s p.%d->%s\n", batchfile, page, sourcefile)
+			//fmt.Printf("%s p.%d->%s\n", batchfile, page, sourcefile)
 			if _, ok := organisedFields[batchfile][page]; ok {
 				organisedFields[batchfile][page]["SourceFile"] = sourcefile
 
 				// find original submission details
+				var submission *parselearn.Submission
+
 				if sub, ok := submissionsByFile[sourcefile]; ok {
-					fmt.Println("Adding this to the record soon ...")
-					PrettyPrintStruct(sub)
-				} else {
-					if sub, ok := submissionsByOriginalFile[sourcefile]; ok {
-						fmt.Println("Adding this to the record soon ... (by ORIGNAL submission)")
-						PrettyPrintStruct(sub)
-					}
+					submission = sub
+				} else if sub, ok := submissionsByOriginalFile[sourcefile]; ok {
+					submission = sub
 				}
-				PrettyPrintStruct(organisedFields[batchfile][page])
-				fmt.Println("=========================================")
+				results = append(results, ScanResult{Submission: *submission})
+				//PrettyPrintStruct(organisedFields[batchfile][page])
+				//fmt.Println("=========================================")
 			}
 		}
 	}
-
-	/*fieldName := ""
-	if len(os.Args) >= 3 {
-		fieldName = os.Args[2]
-	}
-
-	err := printPdfFieldData(pdfPath, fieldName)
+	err := WriteResultsToCSV(results, csvPath) //		PrettyPrintStruct(results)
 	if err != nil {
-		fmt.Printf("Error: %v\n", err)
+		fmt.Println(err)
 		os.Exit(1)
 	}
-
-	var opt cmdOptions
-
-	fmt.Printf("Input file: %s\n", pdfPath)
-	err = inspectPdf(pdfPath, opt)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}*/
-
 }
 
 func readIngestReport(inputPath string) ([]*parselearn.Submission, error) {
@@ -200,14 +197,14 @@ func readIngestReport(inputPath string) ([]*parselearn.Submission, error) {
 	return subs, nil
 }
 
-func WriteSubmissionsToCSV(subs []parselearn.Submission, outputPath string) error {
+func WriteResultsToCSV(results []ScanResult, outputPath string) error {
 	// wrap the marshalling library in case we need converters etc later
 	file, err := os.OpenFile(outputPath, os.O_RDWR|os.O_CREATE, os.ModePerm)
 	if err != nil {
 		return err
 	}
 	defer file.Close()
-	return gocsv.MarshalFile(&subs, file)
+	return gocsv.MarshalFile(&results, file)
 }
 
 func whatPageIsThisFrom(key string) (int, string) {
