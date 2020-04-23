@@ -62,6 +62,8 @@ func main() {
 
 	files := make(map[string]map[int]string) //map of source files, by batch file + page
 
+	textfields := make(map[string]map[string]string) //flat key-val for whole batch file
+
 	// iterate over the files in our list
 	for _, inputPath := range inputPaths {
 
@@ -74,9 +76,15 @@ func main() {
 			files[inputPath] = texts
 		}
 
+		fields, err := mapPdfFieldData(inputPath)
+		if err == nil {
+			textfields[inputPath] = fields
+		}
+
 	}
 
 	fmt.Println(files)
+	fmt.Println(textfields)
 
 	/*fieldName := ""
 	if len(os.Args) >= 3 {
@@ -141,6 +149,46 @@ func printPdfFieldData(inputPath, targetFieldName string) error {
 		return errors.New("field not found")
 	}
 	return nil
+}
+
+func mapPdfFieldData(inputPath string) (map[string]string, error) {
+
+	textfields := make(map[string]string)
+
+	f, err := os.Open(inputPath)
+	if err != nil {
+		return textfields, errors.New(fmt.Sprintf("Problem opening file %s", inputPath))
+	}
+	defer f.Close()
+
+	pdfReader, err := pdf.NewPdfReader(f)
+	if err != nil {
+		return textfields, errors.New(fmt.Sprintf("Problem creating reader %s", inputPath))
+	}
+
+	acroForm := pdfReader.AcroForm
+	if acroForm == nil {
+		return textfields, nil
+	}
+
+	fields := acroForm.AllFields()
+	for _, field := range fields {
+		fullname, err := field.FullName()
+		if err != nil {
+			continue
+		}
+
+		val := ""
+
+		if field.V != nil {
+			val = field.V.String()
+		}
+
+		textfields[fullname] = val
+
+	}
+
+	return textfields, nil
 }
 
 func getText(inputPath string, opt cmdOptions) (map[int]string, error) {
