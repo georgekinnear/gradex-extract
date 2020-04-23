@@ -15,6 +15,7 @@ import (
 
 	unicommon "github.com/unidoc/unipdf/v3/common"
 	pdfcore "github.com/unidoc/unipdf/v3/core"
+	extractor "github.com/unidoc/unipdf/v3/extractor"
 	pdf "github.com/unidoc/unipdf/v3/model"
 )
 
@@ -129,6 +130,34 @@ func inspectPdf(inputPath string, opt cmdOptions) error {
 	numPages, err := pdfReader.GetNumPages()
 	if err != nil {
 		return err
+	}
+
+	for p, page := range pdfReader.PageList {
+
+		ex, err := extractor.New(page)
+
+		if err == nil {
+
+			text, err := ex.ExtractText()
+			if err == nil {
+				fmt.Println(text)
+			}
+
+		}
+
+		fmt.Printf("===== PAGE %d=====\n", p)
+
+		fmt.Printf("Has filename? %v", page.HasXObjectByName("filename"))
+
+		if annotations, err := page.GetAnnotations(); err == nil {
+
+			for _, annot := range annotations {
+				//fmt.Printf("%v\n", annot)
+				fmt.Println(annot)
+			}
+
+		}
+
 	}
 
 	fmt.Printf("PDF Num Pages: %d\n", numPages)
