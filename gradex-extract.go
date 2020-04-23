@@ -12,6 +12,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -69,21 +70,37 @@ func main() {
 
 	textfields := make(map[string]map[string]string) //flat key-val for whole batch file
 
+	submissionsByOriginalFile := make(map[string]*parselearn.Submission)
+	submissionsByFile := make(map[string]*parselearn.Submission)
+
 	// iterate over the files in our list
 	for _, inputPath := range inputPaths {
 
 		// find out what original file each page came from
 		// for now - we assume one text per page, and one page per file
 		// because this is for interpreting montage output, only, at the moment
-		texts, err := getText(inputPath, opt)
-		if err == nil {
-			//fmt.Println(texts)
-			files[inputPath] = texts
-		}
 
-		fields, err := mapPdfFieldData(inputPath)
-		if err == nil {
-			textfields[inputPath] = fields
+		if strings.Compare(filepath.Ext(inputPath), ".pdf") == 0 {
+			texts, err := getText(inputPath, opt)
+			if err == nil {
+				//fmt.Println(texts)
+				files[inputPath] = texts
+			}
+
+			fields, err := mapPdfFieldData(inputPath)
+			if err == nil {
+				textfields[inputPath] = fields
+			}
+		}
+		if strings.Compare(filepath.Ext(inputPath), ".csv") == 0 {
+			if subs, err := readIngestReport(inputPath); err == nil {
+				for _, sub := range subs {
+					submissionsByFile[sub.Filename] = sub
+					submissionsByOriginalFile[sub.OriginalFilename] = sub
+				}
+
+			}
+
 		}
 
 	}
@@ -130,7 +147,7 @@ func main() {
 			if _, ok := organisedFields[batchfile][page]; ok {
 				organisedFields[batchfile][page]["SourceFile"] = sourcefile
 				PrettyPrintStruct(organisedFields[batchfile][page])
-				fmt.Println("=========================================\n")
+				fmt.Println("=========================================")
 			}
 		}
 	}
@@ -155,6 +172,21 @@ func main() {
 		os.Exit(1)
 	}*/
 
+}
+
+func readIngestReport(inputPath string) ([]*parselearn.Submission, error) {
+	subs := []*parselearn.Submission{}
+	f, err := os.Open(inputPath)
+	if err != nil {
+		return subs, errors.New("can't open file")
+	}
+	defer f.Close()
+
+	if err := gocsv.UnmarshalFile(f, &subs); err != nil { // Load subs
+		return subs, errors.New("can't unmarshall from file")
+	}
+
+	return subs, nil
 }
 
 func WriteSubmissionsToCSV(subs []parselearn.Submission, outputPath string) error {
