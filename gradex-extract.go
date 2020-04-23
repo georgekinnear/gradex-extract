@@ -48,6 +48,8 @@ type ScanResult struct {
 	FilenameNoCourse       bool   `csv:"FilenameNoCourse"`
 	FilenameNoID           bool   `csv:"FilenameNoID"`
 	InputFile              string `csv:"InputFile"`
+	BatchFile              string `csv:"BatchFile"`
+	BatchPage              int    `csv:"BatchPage"`
 	Submission             parselearn.Submission
 }
 
@@ -164,6 +166,8 @@ func main() {
 
 				thisScan := ScanResult{}
 				thisScan.Submission = *submission
+				thisScan.BatchFile = batchfile
+				thisScan.BatchPage = page
 
 				insertCheckReport(&thisScan, organisedFields[batchfile][page])
 
@@ -171,6 +175,8 @@ func main() {
 			}
 		}
 	}
+
+	PrettyPrintStruct(results)
 	err := WriteResultsToCSV(results, csvPath)
 	if err != nil {
 		fmt.Println(err)
