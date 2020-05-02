@@ -165,7 +165,9 @@ func main() {
 				}
 
 				thisScan := ScanResult{}
-				thisScan.Submission = *submission
+				if submission != nil {
+					thisScan.Submission = *submission
+				}
 				thisScan.BatchFile = batchfile
 				thisScan.BatchPage = page + 1 //humans often start thinking at page 1
 

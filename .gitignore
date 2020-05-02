@@ -9,7 +9,8 @@
 /#*
 *.pdf
 *.jpg
-
+*.csv
+secret
 # Test binary, built with `go test -c`
 *.test
 gradex-extract
