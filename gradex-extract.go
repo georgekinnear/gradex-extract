@@ -9,6 +9,7 @@ package main
 
 import (
 	"encoding/json"
+	"encoding/csv"
 	"errors"
 	"flag"
 	"fmt"
@@ -17,6 +18,8 @@ import (
 	"strconv"
 	"strings"
 	"regexp"
+	"time"
+	"sort"
 
 	"github.com/gocarina/gocsv"
 	"github.com/timdrysdale/parselearn"
@@ -75,6 +78,9 @@ func main() {
 
 	var inputDir string
 	flag.StringVar(&inputDir, "inputdir", "./", "path of the folder containing the PDF files to be processed (if in multimarker mode, will also check sub-folders with 'marker' in their name")
+	
+	var partsCSV string
+	flag.StringVar(&partsCSV, "parts", "../parts_and_marks.csv", "path to the csv of parts and marks")
 
 	flag.Parse()
 
@@ -84,6 +90,23 @@ func main() {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+	
+	// Try to find parts_and_marks.csv
+	if *multiMarker && partsCSV == "../parts_and_marks.csv" {
+		// see if the default CSV value needs to be changed - in multimarker mode, we expect it to be in the current directory instead
+		if _, err := os.Stat(partsCSV); os.IsNotExist(err) {
+			partsCSV = "parts_and_marks.csv"
+		}
+	}
+	if _, err := os.Stat(partsCSV); os.IsNotExist(err) {
+		fmt.Println("Could not locate", partsCSV)
+		os.Exit(1)
+	}
+	parts := getPartsAndMarks(partsCSV)
+	PrettyPrintStruct(parts)
+	
+	
+	report_time := time.Now().Format("2006-01-02-15-04-05")
 
 	if *multiMarker {
 		
@@ -104,11 +127,14 @@ func main() {
 	} else {
 		// Only considering a single marker, and we expect inputDir to be the folder containing their marked PDFs
 		fmt.Println("Looking at input directory: ",inputDir)
-		form_values := readFormsInDirectory(inputDir)
-
-		//fmt.Println(PrettyPrintStruct(form_values))
 		
-		validation := validateMarking(form_values)
+		// Read the raw form values, and save them as a csv in the same folder as the scripts
+		csv_path := fmt.Sprintf("%s/01_raw_form_values-%s.csv", inputDir, report_time)
+		form_values := readFormsInDirectory(inputDir, csv_path)
+
+		// Now summarise the marks and perform validation checks
+		csv_path = fmt.Sprintf("%s/00_marks_summary-%s.csv", inputDir, report_time)
+		validation := validateMarking(form_values, parts, csv_path)
 		
 		fmt.Println(validation)
 	}
@@ -238,7 +264,29 @@ func main() {
 */
 }
 
-func readFormsInDirectory(formsPath string) []FormValues {
+func check(e error) {
+    if e != nil {
+        panic(e)
+    }
+}
+
+func getPartsAndMarks(csv_path string) []*PaperStructure {
+	
+	marksFile, err := os.OpenFile(csv_path, os.O_RDWR|os.O_CREATE, os.ModePerm)
+	if err != nil {
+		fmt.Println("File: ",csv_path, err)
+		panic(err)
+	}
+	defer marksFile.Close()
+
+	parts := []*PaperStructure{}
+	if err := gocsv.UnmarshalFile(marksFile, &parts); err != nil {
+		panic(err)
+	}
+	return parts
+}
+
+func readFormsInDirectory(formsPath string, outputCSV string) []FormValues {
 
 	form_vals := []FormValues{}
 	
@@ -247,12 +295,19 @@ func readFormsInDirectory(formsPath string) []FormValues {
 	var num_scripts int
 	filepath.Walk(formsPath, func(path string, f os.FileInfo, _ error) error {
 		if !f.IsDir() {
+			if filepath.Ext(f.Name()) != ".pdf" {
+				return nil
+			}
 			proper_filename := filename_examno.MatchString(f.Name())
 			if proper_filename {
 				extracted_examno := filename_examno.FindStringSubmatch(f.Name())[1]
-				// TODO - check that extracted_examno matches the one on the script!
-				fmt.Println(extracted_examno)
-				form_vals = append(form_vals, readFormFromPDF(path)...)
+				vals_on_this_form := readFormFromPDF(path)
+				// check that extracted_examno matches the one on the script!
+				if vals_on_this_form[0].ExamNumber != extracted_examno {
+					fmt.Println("Exam number mismatch: file",path,"has value",vals_on_this_form[0].ExamNumber)
+				}
+				
+				form_vals = append(form_vals, vals_on_this_form...)
 				num_scripts++
 			} else {
 				fmt.Println("Malformed filename: ", f.Name())
@@ -262,7 +317,7 @@ func readFormsInDirectory(formsPath string) []FormValues {
 	})
 	
 	
-	file, err := os.OpenFile("output.csv", os.O_RDWR|os.O_CREATE, os.ModePerm)
+	file, err := os.OpenFile(outputCSV, os.O_RDWR|os.O_CREATE, os.ModePerm)
 	if err != nil {
 		fmt.Println(err)
 		return nil
@@ -296,21 +351,260 @@ func readFormFromPDF(path string) []FormValues {
 	field_data, _ := mapPdfFieldData(path)
 	//PrettyPrintStruct(field_data)
 	
+	var form_values int
 	for key, val := range field_data {
+		// TODO - perhaps don't bother storing the empty values? consider moving all this inside the "if"
 		this_form_entry := form_vals
 		this_form_entry.Field = key
 		this_form_entry.Value = val
 		all_form_vals = append(all_form_vals, this_form_entry)
+		if hasContent(val) {
+			form_values++
+		}
 	}
 	
+	fmt.Printf("%s has %d entries\n", form_vals.ExamNumber, form_values)
 	//PrettyPrintStruct(all_form_vals)
 	
 	return all_form_vals
 }
 
-func validateMarking([]FormValues) (error) {
+func validateMarking(form_values []FormValues, parts []*PaperStructure, outputCSV string) (error) {
+	
+	// understand the parts structure
+	// NB - not really necessary, maybe can just do parts[3].Mark where 3 = the integer used in the PDF form ID
+	marks_available := make(map[int]int)
+	part_name := make(map[int]string)
+	part_to_marks := make(map[string]int)
+	for pnum, part := range parts {
+		if part.Part != "" {
+			marks_available[pnum] = part.Marks
+			part_name[pnum] = part.Part
+			part_to_marks[part.Part] = part.Marks
+		}
+	}
+	fmt.Println(marks_available,"\n", part_name)
+	
+	// Set up maps to store data
+	mark_details := make(map[string]map[string][]string) // mark_details[ExamNo][part] = [4,5,6]
+	validation := make(map[string][]string) // validation[ExamNo] = ["1a has no mark", "1b noninteger mark"]
+	marks_on_page := make(map[string]map[int]int) // marks_on_page[ExamNo][1] = 0
+	marks_awarded := make(map[string]bool) // marks_awarded[part] = T if marks are awarded to any student for this part
+	bad_pages := make(map[string][]int) // bad_pages[ExamNo] = [1,4,5]
+	
+	for _, entry := range form_values {
+		ExamNo := entry.ExamNumber
+		if !strings.Contains(entry.Field, "page") {
+			continue // quietly skip fields that don't have a page
+		}
+		page, field_name := whatPageIsThisFrom(entry.Field)
+		
+		// Prepare nested maps to receive values
+		if _, ok := marks_on_page[ExamNo][page]; !ok {
+			if _, ok := marks_on_page[ExamNo]; !ok {
+				marks_on_page[ExamNo] = make(map[int]int)
+			}
+			marks_on_page[ExamNo][page] = 0
+		}
+		
+		// Bad Page has been selected
+		if field_name == "page-bad" && hasContent(entry.Value) {
+			bad_pages[ExamNo] = append(bad_pages[ExamNo], page)
+			marks_on_page[ExamNo][page]++
+		}
+		
+		// Page Seen has been selected
+		if field_name == "page-seen" && hasContent(entry.Value) {
+			marks_on_page[ExamNo][page]++
+		}
+		
+		// Marks Awarded field has been completed
+		if strings.HasPrefix(field_name, "qn-part-mark-") && hasContent(entry.Value) {
+			partnum, _ := strconv.Atoi(strings.TrimPrefix(field_name, "qn-part-mark-"))
+			partname := part_name[partnum]
+			part_max := marks_available[partnum]
+	
+			// Prepare the nested maps to receive values
+			if validation[ExamNo] == nil {
+				validation[ExamNo] = []string{}
+			}
+			if mark_details[ExamNo][partname] == nil {
+				if mark_details[ExamNo] == nil {
+					mark_details[ExamNo] = make(map[string][]string)
+				}
+				mark_details[ExamNo][partname] = []string{}
+			}
+			
+			// Get the integer value
+			var mark_awarded int
+			if intval, err := strconv.Atoi(entry.Value); err == nil {
+				mark_awarded = intval
+				marks_awarded[partname] = true
+			} else {
+				validation[ExamNo] = append(validation[ExamNo], partname+": noninteger mark")
+			}
+			
+			// Validation of the value
+			if mark_awarded > part_max {
+				validation[ExamNo] = append(validation[ExamNo], partname+": max mark is "+strconv.Itoa(part_max))			
+			}
+			
+			mark_details[ExamNo][partname] = append(mark_details[ExamNo][partname], entry.Value)
+			marks_on_page[ExamNo][page]++
+			
+		}
+		
+	}
+	
+	fmt.Println(marks_awarded)
+	
+	// Carry out further validation of the marks
+	// Also prepare the mark cells of the CSV
+	mark_summary := make(map[string]map[string]string) // mark_summary[ExamNo][part] = "4+5" or "4" or "2.5"
+	for ExamNo, marks_by_part := range mark_details {
+		
+		fmt.Println(ExamNo)
+		PrettyPrintStruct(marks_by_part)
+		
+		// Prepare the nested maps to receive values
+		if validation[ExamNo] == nil {
+			validation[ExamNo] = []string{}
+		}
+		mark_summary[ExamNo] = make(map[string]string)
+		
+		// Further validation of each part
+		for _, pname := range part_name {
+		
+			// Represent a lack of marks by an empty list
+			if marks_by_part[pname] == nil {
+				marks_by_part[pname] = []string{}
+			}
+		
+			// If marks have been awarded to at least one student for this part, check that this student has a mark too
+			if marks_awarded[pname] {
+				if len(marks_by_part[pname]) == 0 {
+					validation[ExamNo] = append(validation[ExamNo], pname+": not marked")
+				}
+			}
+		
+			// Warn if marks are awarded on more than 1 occasion
+			if len(marks_by_part[pname]) > 1 {
+				validation[ExamNo] = append(validation[ExamNo], pname+": multiple marks")
+			}
+			
+			mark_summary[ExamNo][pname] = strings.Join(marks_by_part[pname], " + ")
+		
+		}
+		
+		// put the validation messages into alphabetical order
+		sort.Strings(validation[ExamNo])
+		mark_summary[ExamNo]["Validation"] = strings.Join(validation[ExamNo], "; ")
+		
+		PrettyPrintStruct(mark_summary[ExamNo])
+		PrettyPrintStruct(validation[ExamNo])
+		
+	}
+	
+	/* 
+	|   Produce the CSV output
+	*/
+	file, err := os.OpenFile(outputCSV, os.O_RDWR|os.O_CREATE, os.ModePerm)
+	check(err)
+	defer file.Close()
+	w := csv.NewWriter(file)
+	
+	// First come up with the csv_headers - have to work pretty hard to get that as a slice in the right order
+	keys := make([]string, 0, len(mark_summary))
+	values := make([]map[string]string, 0, len(mark_summary))
+
+	for k, v := range mark_summary {
+		keys = append(keys, k)
+		values = append(values, v)
+	}
+	
+	PrettyPrintStruct(keys)
+	PrettyPrintStruct(values)
+	
+	csv_headers := []string{}
+	for k, _ := range values[0] {
+		csv_headers = append(csv_headers, k)
+	}
+	sort.Strings(csv_headers)
+	csv_headers = append([]string{"Exam Number"}, csv_headers...)
+	PrettyPrintStruct(csv_headers)
+	
+	err = w.Write(csv_headers)
+	check(err)
+	
+	// Add a row showing what each question is marked out of
+	row_outof := []string{"out of:"}
+	for _, val := range csv_headers {
+		if outof, ok := part_to_marks[val]; ok {
+			row_outof = append(row_outof, fmt.Sprintf("%v", outof))
+		}
+	}
+	err = w.Write(row_outof)
+	check(err)
+	
+	// TODO - sort the list of students by Exam Number. Separate out the ones requiring validation
+	student_records_invalid := []string{}
+	student_records_valid := []string{}
+	for enum, _ := range mark_summary {
+		if len(mark_summary[enum]["Validation"])>0 {
+			student_records_invalid = append(student_records_invalid, enum)
+		} else {
+			student_records_valid = append(student_records_valid, enum)		
+		}
+	}
+	sort.Strings(student_records_invalid)
+	sort.Strings(student_records_valid)
+
+	// Print each row for the invalid records - again, have to work hard
+	// to make sure the slice for each student is in the correct order
+	err = w.Write([]string{"Validation problems ("+strconv.Itoa(len(student_records_invalid))+" scripts):"})
+	check(err)
+	for _, ExamNo := range student_records_invalid {
+		record := []string{fmt.Sprintf("%v", ExamNo)}
+		for _, val := range csv_headers {
+			if val == "Exam Number" { continue }
+			record = append(record, fmt.Sprintf("%v", mark_summary[ExamNo][val]))
+		}
+		err := w.Write(record)
+		check(err)
+	}
+	// Now do the valid ones
+	err = w.Write([]string{"Marking completed ("+strconv.Itoa(len(student_records_valid))+" scripts):"})
+	check(err)
+	for _, ExamNo := range student_records_valid {
+		record := []string{fmt.Sprintf("%v", ExamNo)}
+		for _, val := range csv_headers {
+			if val == "Exam Number" { continue }
+			record = append(record, fmt.Sprintf("%v", mark_summary[ExamNo][val]))
+		}
+		err := w.Write(record)
+		check(err)
+	}
+/*	
+	// Now loop through mark_summary and print out each row - again, have to work hard
+	// to make sure the slice for each student is in the correct order
+	for ExamNo, recordset := range mark_summary {
+		record := []string{fmt.Sprintf("%v", ExamNo)}
+		for _, val := range csv_headers {
+			if val == "Exam Number" { continue }
+			record = append(record, fmt.Sprintf("%v", recordset[val]))
+		}
+		err := w.Write(record)
+		check(err)
+	}
+*/
+	w.Flush()
 	
 	
+	
+	//fmt.Println(mark_summary)
+	//PrettyPrintStruct(mark_details)
+	//PrettyPrintStruct(validation)
+	//PrettyPrintStruct(marks_on_page)
 	
 	return nil
 }
@@ -343,6 +637,10 @@ func extractExamNumber(pdf_text map[int]string) string {
 	// exam number is the last word on the first line https://regex101.com/r/9GjHTM/11
 	findexamno, _ := regexp.Compile(" ([a-zA-Z0-9]+)\n")
 	return findexamno.FindStringSubmatch(raw_string_p1)[1]
+}
+
+func hasContent(str string) bool {
+	return strings.Compare(str, "") != 0
 }
 
 func boolVal(str string) bool {
@@ -475,23 +773,19 @@ func WriteResultsToCSV(results []ScanResult, outputPath string) error {
 func whatPageIsThisFrom(key string) (int, string) {
 
 	// fortunately, a rather fixed format! We get away with using prior knowledge for now
-	if strings.HasPrefix(key, "page-000-") {
+/*	if strings.HasPrefix(key, "page-000-") {
 		basekey := strings.TrimPrefix(key, "page-000-")
-		return 0, basekey
+		return 1, basekey
 	}
-
-	tokens := strings.Split(key, ".")
-	if len(tokens) > 1 { //ignore the "docN" empty entries at the start of each page
-		pageString := strings.TrimPrefix(tokens[0], "doc")
-		pageInt, err := strconv.ParseInt(pageString, 10, 64)
-		if err != nil {
-			return -1, ""
-		}
-		basekey := strings.TrimPrefix(tokens[1], "page-000-")
-		return int(pageInt) - 1, basekey //doc nums are out by 1 from our page index
+	*/
+	// Pick out page number and basekey https://regex101.com/r/vGyDbg/1
+	parse_field_name, _ := regexp.Compile(".*page-([0-9]+)-(.*)")
+	parsed_key := parse_field_name.FindStringSubmatch(key)
+	parsed_pageno, err := strconv.Atoi(parsed_key[1])
+	if err != nil {
+		return -1, ""
 	}
-
-	return -1, ""
+	return parsed_pageno + 1, parsed_key[2] // the basekey is the 2nd submatch
 
 }
 
