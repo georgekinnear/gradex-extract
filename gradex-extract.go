@@ -10,17 +10,33 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"regexp"
 
 	"github.com/gocarina/gocsv"
 	"github.com/timdrysdale/parselearn"
-	extractor "github.com/unidoc/unipdf/v3/extractor"
-	pdf "github.com/unidoc/unipdf/v3/model"
+	extractor "github.com/timdrysdale/unipdf/v3/extractor"
+	pdf "github.com/timdrysdale/unipdf/v3/model"
 )
+
+type FormValues struct {
+	CourseCode string `csv:"CourseCode"`
+	Marker     string `csv:"Marker"`
+	ExamNumber string `csv:"ExamNumber"`
+	Field      string `csv:"Field"`
+	Value      string `csv:"Value"`
+}
+
+// Structure for the optional reading a csv of parts and marks
+type PaperStructure struct {
+	Part       string  `csv:"part"`
+	Marks      int     `csv:"marks"`
+}
 
 type cmdOptions struct {
 	pdfPassword string
@@ -53,37 +69,71 @@ type ScanResult struct {
 	Submission             parselearn.Submission
 }
 
-//type Submission struct {
-//	FirstName          string  `csv:"FirstName"`
-//	LastName           string  `csv:"LastName"`
-//	Matriculation      string  `csv:"Matriculation"`
-//	Assignment         string  `csv:"Assignment"`
-//	DateSubmitted      string  `csv:"DateSubmitted"`
-//	SubmissionField    string  `csv:"SubmissionField"`
-//	Comments           string  `csv:"Comments"`
-//	OriginalFilename   string  `csv:"OriginalFilename"`
-//	Filename           string  `csv:"Filename"`
-//	ExamNumber         string  `csv:"ExamNumber"`
-//	MatriculationError string  `csv:"MatriculationError"`
-//	ExamNumberError    string  `csv:"ExamNumberError"`
-//	FiletypeError      string  `csv:"FiletypeError"`
-//	FilenameError      string  `csv:"FilenameError"`
-//	NumberOfPages      string  `csv:"NumberOfPages"`
-//	FilesizeMB         float64 `csv:"FilesizeMB"`
-//	NumberOfFiles      int     `csv:"NumberOfFiles"`
-//}
-
 func main() {
-	// When debugging, enable debug-level logging via console:
-	//unicommon.SetLogger(unicommon.NewConsoleLogger(unicommon.LogLevelDebug))
 
-	if len(os.Args) < 2 {
-		fmt.Printf("Usage: gradex-extract outputPath inputPaths\n")
+	multiMarker := flag.Bool("multimarker", false, "consolidate marks from multiple markers? (true/false)")
+
+	var inputDir string
+	flag.StringVar(&inputDir, "inputdir", "./", "path of the folder containing the PDF files to be processed (if in multimarker mode, will also check sub-folders with 'marker' in their name")
+
+	flag.Parse()
+
+	
+	if _, err := os.Stat(inputDir); os.IsNotExist(err) {
+		// inputDir does not exist
+		fmt.Println(err)
 		os.Exit(1)
 	}
 
+	if *multiMarker {
+		
+		fmt.Println("Looking at input directory: ",inputDir)
+		
+		// Identify all the sub-directories in which marking is being done
+
+		//  -  ?? walk over the inputDir to find directories with "Marker" in the name
+
+		//  -  for each one, run readFormsInDirectory to get a csv+struct of the form values
+
+		// For each marker, produce validation of their marking
+
+		//  -  run validateMarking and save the resulting csv in their directory
+
+		// Collate the marks from all markers, and save the resulting csv in inputDir
+
+	} else {
+		// Only considering a single marker, and we expect inputDir to be the folder containing their marked PDFs
+		fmt.Println("Looking at input directory: ",inputDir)
+		form_values := readFormsInDirectory(inputDir)
+
+		//fmt.Println(PrettyPrintStruct(form_values))
+		
+		validation := validateMarking(form_values)
+		
+		fmt.Println(validation)
+	}
+
+	os.Exit(1)
+/*
 	csvPath := os.Args[1]
-	inputPaths := os.Args[2:]
+	inputDir := os.Args[2]
+
+	// Find all PDFs in the inputDir
+	err := ensureDir(inputDir)
+	if err != nil {
+		fmt.Println(err)
+		os.Exit(1)
+	}
+	var inputPaths = []string{}
+	filepath.Walk(inputDir, func(path string, f os.FileInfo, _ error) error {
+		if !f.IsDir() {
+			if filepath.Ext(f.Name()) == ".pdf" {
+				inputPaths = append(inputPaths, f.Name())
+			}
+		}
+		return nil
+	})
+	fmt.Println("input files: ", len(inputPaths))
 
 	results := []ScanResult{}
 	var opt cmdOptions
@@ -179,11 +229,120 @@ func main() {
 	}
 
 	PrettyPrintStruct(results)
-	err := WriteResultsToCSV(results, csvPath)
+	err = WriteResultsToCSV(results, csvPath)
 	if err != nil {
 		fmt.Println(err)
 		os.Exit(1)
 	}
+	
+*/
+}
+
+func readFormsInDirectory(formsPath string) []FormValues {
+
+	form_vals := []FormValues{}
+	
+	filename_examno, err := regexp.Compile("(B[0-9]{6})-mark.pdf")
+	
+	var num_scripts int
+	filepath.Walk(formsPath, func(path string, f os.FileInfo, _ error) error {
+		if !f.IsDir() {
+			proper_filename := filename_examno.MatchString(f.Name())
+			if proper_filename {
+				extracted_examno := filename_examno.FindStringSubmatch(f.Name())[1]
+				// TODO - check that extracted_examno matches the one on the script!
+				fmt.Println(extracted_examno)
+				form_vals = append(form_vals, readFormFromPDF(path)...)
+				num_scripts++
+			} else {
+				fmt.Println("Malformed filename: ", f.Name())
+			}
+		}
+		return nil
+	})
+	
+	
+	file, err := os.OpenFile("output.csv", os.O_RDWR|os.O_CREATE, os.ModePerm)
+	if err != nil {
+		fmt.Println(err)
+		return nil
+	}
+	defer file.Close()
+	gocsv.MarshalFile(form_vals, file)
+	
+	return form_vals
+}
+
+func readFormFromPDF(path string) []FormValues {
+
+	all_form_vals := []FormValues{}
+
+	form_vals := FormValues{}
+	
+	// Read the text values from the PDF
+	var opt cmdOptions
+	text_data, _ := getText(path, opt)
+	//PrettyPrintStruct(text_data)
+	
+	form_vals.Marker = extractMarkerInitials(text_data)
+	form_vals.CourseCode = extractCourseCode(text_data)
+	form_vals.ExamNumber = extractExamNumber(text_data)
+	
+	//fmt.Println("Course code: ",form_vals.CourseCode)
+	//fmt.Println("Marker initials: ",form_vals.Marker)
+	//fmt.Println("Exam number: ",form_vals.ExamNumber)
+	
+	// Read the form values from the PDF
+	field_data, _ := mapPdfFieldData(path)
+	//PrettyPrintStruct(field_data)
+	
+	for key, val := range field_data {
+		this_form_entry := form_vals
+		this_form_entry.Field = key
+		this_form_entry.Value = val
+		all_form_vals = append(all_form_vals, this_form_entry)
+	}
+	
+	//PrettyPrintStruct(all_form_vals)
+	
+	return all_form_vals
+}
+
+func validateMarking([]FormValues) (error) {
+	
+	
+	
+	return nil
+}
+
+func extractMarkerInitials(pdf_text map[int]string) string {
+	// TODO - this could check *all* pages to make sure the initials are consistent,
+	// but let's be lazy and just use the first page
+	raw_string_p1 := pdf_text[0]
+	
+	// initials appear as the second line of text https://regex101.com/r/9GjHTM/9
+	findinitials, _ := regexp.Compile(".*\n([a-zA-Z]+)\n")
+	return findinitials.FindStringSubmatch(raw_string_p1)[1]
+}
+
+func extractCourseCode(pdf_text map[int]string) string {
+	// TODO - this could check *all* pages for consistency
+	// but let's be lazy and just use the first page
+	raw_string_p1 := pdf_text[0]
+	
+	// course code is the first word of text https://regex101.com/r/9GjHTM/10
+	findinitials, _ := regexp.Compile("([a-zA-Z0-9]+) ")
+	return findinitials.FindStringSubmatch(raw_string_p1)[1]
+}
+
+func extractExamNumber(pdf_text map[int]string) string {
+	// TODO - this could check *all* pages for consistency
+	// but let's be lazy and just use the first page
+	raw_string_p1 := pdf_text[0]
+	
+	// exam number is the last word on the first line https://regex101.com/r/9GjHTM/11
+	findexamno, _ := regexp.Compile(" ([a-zA-Z0-9]+)\n")
+	return findexamno.FindStringSubmatch(raw_string_p1)[1]
 }
 
 func boolVal(str string) bool {
@@ -477,4 +636,19 @@ func PrettyPrintStruct(layout interface{}) error {
 
 	fmt.Println(string(json))
 	return nil
+}
+
+// pr-pal @ https://stackoverflow.com/questions/37932551/mkdir-if-not-exists-using-golang
+func ensureDir(dirName string) error {
+
+	err := os.Mkdir(dirName, 0700) //probably umasked with 22 not 02
+
+	os.Chmod(dirName, 0700)
+
+	if err == nil || os.IsExist(err) {
+		return nil
+	} else {
+		return err
+	}
+
 }
