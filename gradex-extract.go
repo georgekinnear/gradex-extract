@@ -387,6 +387,7 @@ func validateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 	
 	// Set up maps to store data
 	mark_details := make(map[string]map[string][]string) // mark_details[ExamNo][part] = [4,5,6]
+	script_total := make(map[string]int) // script_total[ExamNo] = 7
 	validation := make(map[string][]string) // validation[ExamNo] = ["1a has no mark", "1b noninteger mark"]
 	marks_on_page := make(map[string]map[int]int) // marks_on_page[ExamNo][1] = 0
 	marks_awarded := make(map[string]int) // marks_awarded[part] = 50 - sum of all student marks on this question
@@ -442,6 +443,7 @@ func validateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 				mark_awarded = intval
 				marks_awarded[partname] = marks_awarded[partname] + intval
 				marks_awarded_count[partname]++
+				script_total[ExamNo] = script_total[ExamNo] + intval
 			} else {
 				validation[ExamNo] = append(validation[ExamNo], partname+": noninteger mark")
 			}
@@ -514,6 +516,9 @@ func validateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 		
 		}
 		
+		// add the Total column
+		mark_summary[ExamNo]["Total"] = strconv.Itoa(script_total[ExamNo])
+		
 		// put the validation messages into alphabetical order
 		sort.Strings(validation[ExamNo])
 		mark_summary[ExamNo]["Validation"] = strings.Join(validation[ExamNo], "; ")
@@ -581,7 +586,7 @@ func validateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 
 	//
 	// Write the header and stats summary rows
-	err = w.Write(append([]string{""}, partnames...))
+	err = w.Write(append([]string{""}, append(partnames, "Total")...))
 	check(err)
 	
 	// Add a row showing what each question is marked out of
@@ -591,19 +596,38 @@ func validateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 			row_outof = append(row_outof, fmt.Sprintf("%v", outof))
 		}
 	}
+	paper_outof := 0
+	for _, part := range parts {
+		if part.Part != "" {
+			paper_outof = paper_outof + part.Marks
+		}
+	}
+	row_outof = append(row_outof, fmt.Sprintf("%v", paper_outof))
 	err = w.Write(row_outof)
 	check(err)
-	// Add a row showing what each question is marked out of
+	
+	// Add a row showing the item means
 	row_means := []string{"mean:"}
 	for _, val := range csv_headers {
 		if _, ok := marks_awarded[val]; ok {
-			fmt.Println(marks_awarded[val], "/", marks_awarded_count[val], "=", float64(marks_awarded[val])/float64(marks_awarded_count[val]))
-			row_means = append(row_means, fmt.Sprintf("%.2f", float64(marks_awarded[val])/float64(marks_awarded_count[val])))
+			mean_string := ""
+			if marks_awarded_count[val] > 0 { // protect from division by 0
+				mean_string = fmt.Sprintf("%.2f", float64(marks_awarded[val])/float64(marks_awarded_count[val]))
+			}
+			row_means = append(row_means, mean_string)
 		}
+	}
+	paper_mean := 0
+	num_scripts := 0
+	for _, tot := range script_total {
+		paper_mean = paper_mean + tot
+		num_scripts++
+	}
+	if num_scripts > 0 {
+		row_means = append(row_means, fmt.Sprintf("%v", float64(paper_mean)/float64(num_scripts)))	
 	}
 	err = w.Write(row_means)
 	check(err)
-	
 	
 	// Separate the Validation/Complete blocsk and sort both lists of students by Exam Number
 	student_records_invalid := []string{}
