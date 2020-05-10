@@ -175,7 +175,7 @@ func readFormsInDirectory(formsPath string, outputCSV string) []FormValues {
 			if proper_filename {
 				extracted_examno := filename_examno.FindStringSubmatch(f.Name())[1]
 				fmt.Println(extracted_examno)
-				vals_on_this_form := readFormFromPDF(path)
+				vals_on_this_form := ReadFormFromPDF(path)
 				// check that extracted_examno matches the one on the script!
 				if vals_on_this_form[0].ExamNumber != extracted_examno {
 					fmt.Println("Exam number mismatch: file",path,"has value",vals_on_this_form[0].ExamNumber)
@@ -202,7 +202,7 @@ func readFormsInDirectory(formsPath string, outputCSV string) []FormValues {
 	return form_vals
 }
 
-func readFormFromPDF(path string) []FormValues {
+func ReadFormFromPDF(path string) []FormValues {
 
 	all_form_vals := []FormValues{}
 
