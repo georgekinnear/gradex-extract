@@ -5,7 +5,7 @@
  * If no field specified will output values for all fields.
  */
 
-package main
+package gradexextract
 
 import (
 	"encoding/json"
@@ -159,10 +159,14 @@ func readFormsInDirectory(formsPath string, outputCSV string) []FormValues {
 
 	form_vals := []FormValues{}
 	
-	filename_examno, err := regexp.Compile("(B[0-9]{6})-mark.pdf")
+	filename_examno, err := regexp.Compile("(B[0-9]{6})-.*.pdf")
 	
 	var num_scripts int
 	filepath.Walk(formsPath, func(path string, f os.FileInfo, _ error) error {
+		//if f.IsDir() && strings.Contains(f.Name(), "Moderation") { // TODO - check that this does not prevent us checking moderated marks!
+		//	return filepath.SkipDir
+		//}
+		fmt.Println(f.Name())
 		if !f.IsDir() {
 			if filepath.Ext(f.Name()) != ".pdf" {
 				return nil
@@ -170,6 +174,7 @@ func readFormsInDirectory(formsPath string, outputCSV string) []FormValues {
 			proper_filename := filename_examno.MatchString(f.Name())
 			if proper_filename {
 				extracted_examno := filename_examno.FindStringSubmatch(f.Name())[1]
+				fmt.Println(extracted_examno)
 				vals_on_this_form := readFormFromPDF(path)
 				// check that extracted_examno matches the one on the script!
 				if vals_on_this_form[0].ExamNumber != extracted_examno {
@@ -206,7 +211,7 @@ func readFormFromPDF(path string) []FormValues {
 	// Read the text values from the PDF
 	var opt cmdOptions
 	text_data, _ := getText(path, opt)
-	//PrettyPrintStruct(text_data)
+	PrettyPrintStruct(text_data)
 	
 	form_vals.Marker = extractMarkerInitials(text_data)
 	form_vals.CourseCode = extractCourseCode(text_data)
@@ -575,10 +580,16 @@ func extractMarkerInitials(pdf_text map[int]string) string {
 	// TODO - this could check *all* pages to make sure the initials are consistent,
 	// but let's be lazy and just use the first page
 	raw_string_p1 := pdf_text[0]
+	initials := ""
 	
 	// initials appear as the second line of text https://regex101.com/r/9GjHTM/9
 	findinitials, _ := regexp.Compile(".*\n([a-zA-Z]+)\n")
-	return findinitials.FindStringSubmatch(raw_string_p1)[1]
+	matches := findinitials.FindStringSubmatch(raw_string_p1)
+	if len(matches)>0 {
+		initials = matches[1]
+	}
+		
+	return initials
 }
 
 func extractCourseCode(pdf_text map[int]string) string {
