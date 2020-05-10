@@ -111,17 +111,16 @@ func ReadFormsInDirectory(formsPath string, outputCSV string) []FormValues {
 			proper_filename := filename_examno.MatchString(f.Name())
 			if proper_filename {
 				extracted_examno := filename_examno.FindStringSubmatch(f.Name())[1]
-				fmt.Println(extracted_examno)
 				vals_on_this_form := ReadFormFromPDF(path, true)
 				// check that extracted_examno matches the one on the script!
 				if vals_on_this_form[0].ExamNumber != extracted_examno {
-					fmt.Println("Exam number mismatch: file",path,"has value",vals_on_this_form[0].ExamNumber)
+					fmt.Println(" - Exam number mismatch: file",path,"has value",vals_on_this_form[0].ExamNumber)
 				}
 				
 				form_vals = append(form_vals, vals_on_this_form...)
 				num_scripts++
 			} else {
-				fmt.Println("Malformed filename: ", f.Name())
+				fmt.Println(" - Malformed filename: ", f.Name())
 			}
 		}
 		return nil
@@ -146,7 +145,6 @@ func ReadFormFromPDF(path string, include_nonempty_values bool) []FormValues {
 	// Read the text values from the PDF
 	var opt cmdOptions
 	text_data, _ := getText(path, opt)
-	PrettyPrintStruct(text_data)
 	
 	form_vals.Marker = extractMarkerInitials(text_data)
 	form_vals.CourseCode = extractCourseCode(text_data)
@@ -175,7 +173,7 @@ func ReadFormFromPDF(path string, include_nonempty_values bool) []FormValues {
 		all_form_vals = append(all_form_vals, this_form_entry)
 	}
 	
-	fmt.Printf("%s has %d entries\n", form_vals.ExamNumber, form_values)
+	fmt.Printf(" - Extracted %d entries for %s\n", form_values, form_vals.ExamNumber)
 	//PrettyPrintStruct(all_form_vals)
 	
 	return all_form_vals
@@ -194,15 +192,24 @@ func ValidateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 			part_to_marks[part.Part] = part.Marks
 		}
 	}
-	fmt.Println(marks_available,"\n", part_name)
+	fmt.Println("Parts:",part_name,"\nMarks available:",marks_available)
+	
+	// Prepare a sorted list of the part names
+	partnames := make([]string, 0, len(part_name))
+	for  _, value := range part_name {
+	   partnames = append(partnames, value)
+	}
+	sort.Strings(partnames)
 	
 	coursecode := ""
 	markers := make(map[string]bool)
 	
 	// Set up maps to store data
 	mark_details := make(map[string]map[string][]string) // mark_details[ExamNo][part] = [4,5,6]
+	moderation_details := make(map[string]map[string][]string) // moderation_details[ExamNo][part] = [4,5,6]
 	script_total := make(map[string]int) // script_total[ExamNo] = 7
-	validation := make(map[string][]string) // validation[ExamNo] = ["1a has no mark", "1b noninteger mark"]
+	//validation := make(map[string][]string) // validation[ExamNo] = ["1a has no mark", "1b noninteger mark"]
+	validation := make(map[string]map[string]string) // validation[ExamNo]["1a"] = "noninteger mark"
 	marks_on_page := make(map[string]map[int]int) // marks_on_page[ExamNo][1] = 0
 	marks_awarded := make(map[string]int) // marks_awarded[part] = 50 - sum of all student marks on this question
 	marks_awarded_count := make(map[string]int) // marks_awarded[part] = 5 - number of students awarded marks
@@ -213,14 +220,10 @@ func ValidateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 		coursecode = entry.CourseCode
 		markers[entry.Marker] = true
 		
-		fmt.Println(ExamNo, entry)
-		
 		if !strings.Contains(entry.Field, "page") {
 			continue // quietly skip fields that don't have a page
 		}
 		page, field_name := whatPageIsThisFrom(entry.Field)
-		
-		fmt.Println(ExamNo, page, field_name, entry.Value)
 		
 		// Prepare nested maps to receive values
 		if _, ok := marks_on_page[ExamNo][page]; !ok {
@@ -231,6 +234,12 @@ func ValidateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 		}
 		if mark_details[ExamNo] == nil {
 			mark_details[ExamNo] = make(map[string][]string)
+		}
+		if moderation_details[ExamNo] == nil {
+			moderation_details[ExamNo] = make(map[string][]string)
+		}
+		if validation[ExamNo] == nil {
+			validation[ExamNo] = make(map[string]string)
 		}
 		
 		// Bad Page has been selected
@@ -251,9 +260,6 @@ func ValidateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 			part_max := marks_available[partnum]
 	
 			// Prepare the nested maps to receive values
-			if validation[ExamNo] == nil {
-				validation[ExamNo] = []string{}
-			}
 			if mark_details[ExamNo][partname] == nil {
 				mark_details[ExamNo][partname] = []string{}
 			}
@@ -266,12 +272,12 @@ func ValidateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 				marks_awarded_count[partname]++
 				script_total[ExamNo] = script_total[ExamNo] + intval
 			} else {
-				validation[ExamNo] = append(validation[ExamNo], partname+": noninteger mark")
+				validation[ExamNo][partname] = "noninteger mark"
 			}
 			
 			// Validation of the value
 			if mark_awarded > part_max {
-				validation[ExamNo] = append(validation[ExamNo], partname+": max mark is "+strconv.Itoa(part_max))			
+				validation[ExamNo][partname] = "max mark is "+strconv.Itoa(part_max)
 			}
 			
 			mark_details[ExamNo][partname] = append(mark_details[ExamNo][partname], entry.Value)
@@ -281,17 +287,19 @@ func ValidateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 		
 		// Moderation fields have been used
 		if strings.HasPrefix(field_name, "qn-part-moderate-") && hasContent(entry.Value) {
-			fmt.Println(entry)
 			partnum, _ := strconv.Atoi(strings.TrimPrefix(field_name, "qn-part-moderate-"))
 			partname := part_name[partnum]
 			part_max := marks_available[partnum]
 	
-			// Prepare the nested maps to receive values
-			if validation[ExamNo] == nil {
-				validation[ExamNo] = []string{}
-			}
-			if mark_details[ExamNo][partname] == nil {
-				mark_details[ExamNo][partname] = []string{}
+			// If this is the first time a moderation value has been encountered for this part:
+			// - prepare structure to receive the marks
+			// - clear out existing values from the original marker
+			if moderation_details[ExamNo][partname] == nil {
+				moderation_details[ExamNo][partname] = []string{}
+				script_total[ExamNo] = script_total[ExamNo] - marks_awarded[partname]
+				marks_awarded[partname] = 0
+				marks_awarded_count[partname] = 0
+				delete(validation[ExamNo], partname)
 			}
 			
 			// Get the integer value
@@ -302,15 +310,15 @@ func ValidateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 				marks_awarded_count[partname]++
 				script_total[ExamNo] = script_total[ExamNo] + intval
 			} else {
-				validation[ExamNo] = append(validation[ExamNo], partname+": noninteger mark")
+				validation[ExamNo][partname] = "noninteger mark"
 			}
 			
 			// Validation of the value
 			if mark_awarded > part_max {
-				validation[ExamNo] = append(validation[ExamNo], partname+": max mark is "+strconv.Itoa(part_max))			
+				validation[ExamNo][partname] = "max mark is "+strconv.Itoa(part_max)	
 			}
 			
-			mark_details[ExamNo][partname] = append(mark_details[ExamNo][partname], entry.Value)
+			moderation_details[ExamNo][partname] = append(moderation_details[ExamNo][partname], entry.Value)
 			marks_on_page[ExamNo][page]++
 			
 		}
@@ -320,11 +328,13 @@ func ValidateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 	// Carry out further validation of the marks
 	// Also prepare the mark cells of the CSV
 	mark_summary := make(map[string]map[string]string) // mark_summary[ExamNo][part] = "4+5" or "4" or "2.5"
+	row_totals := make(map[string]int) // row_totals["B123456"] = 15
+	col_totals := make(map[string]int) // col_totals["1a"] = 250
 	for ExamNo, marks_by_part := range mark_details {
 		
 		// Prepare the nested maps to receive values
 		if validation[ExamNo] == nil {
-			validation[ExamNo] = []string{}
+			validation[ExamNo] = make(map[string]string)
 		}
 		mark_summary[ExamNo] = make(map[string]string)
 		
@@ -347,6 +357,11 @@ func ValidateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 		// Further validation of each part
 		for _, pname := range part_name {
 		
+			// Overwrite with moderation if it exists
+			if moderation_details[ExamNo][pname] != nil {
+				marks_by_part[pname] = moderation_details[ExamNo][pname]
+			}
+		
 			// Represent a lack of marks by an empty list
 			if marks_by_part[pname] == nil {
 				marks_by_part[pname] = []string{}
@@ -355,25 +370,38 @@ func ValidateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 			// If marks have been awarded to at least one student for this part, check that this student has a mark too
 			if  _, ok := marks_awarded[pname]; ok {
 				if len(marks_by_part[pname]) == 0 {
-					validation[ExamNo] = append(validation[ExamNo], pname+": not marked")
+					validation[ExamNo][pname] = "not marked"
 				}
 			}
 		
 			// Warn if marks are awarded on more than 1 occasion
 			if len(marks_by_part[pname]) > 1 {
-				validation[ExamNo] = append(validation[ExamNo], pname+": multiple marks")
+				validation[ExamNo][pname] = "multiple marks"
 			}
 			
+			// Produce the entry that will appear in this cell of the table
 			mark_summary[ExamNo][pname] = strings.Join(marks_by_part[pname], " + ")
+			
+			// Contribute to the row/col totals
+			cell_value := sumOfMarks(marks_by_part[pname])
+			row_totals[ExamNo] = row_totals[ExamNo] + cell_value
+			col_totals[pname] = col_totals[pname] + cell_value			
 		
 		}
 		
 		// add the Total column
-		mark_summary[ExamNo]["Total"] = strconv.Itoa(script_total[ExamNo])
+		//mark_summary[ExamNo]["Total"] = strconv.Itoa(script_total[ExamNo])
+		mark_summary[ExamNo]["Total"] = strconv.Itoa(row_totals[ExamNo])
 		
-		// put the validation messages into alphabetical order
-		sort.Strings(validation[ExamNo])
-		mark_summary[ExamNo]["Validation"] = strings.Join(validation[ExamNo], "; ")
+		// add the validation messages
+		part_validation := make([]string, 0, len(partnames))
+		for  _, pname := range part_name {
+			if  _, ok := validation[ExamNo][pname]; ok {
+				part_validation = append(part_validation, pname+": "+validation[ExamNo][pname])
+			}
+		}
+		sort.Strings(part_validation)
+		mark_summary[ExamNo]["Validation"] = strings.Join(part_validation, "; ")
 		
 		
 		// Unmarked Pages - add column to mark_summary
@@ -400,9 +428,10 @@ func ValidateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 	|   Produce the CSV output
 	=======================================================================*/
 	
-	fmt.Println("MARK SUMMARY")
-	PrettyPrintStruct(mark_summary)
+	//fmt.Println("MARK SUMMARY")
+	//PrettyPrintStruct(mark_summary)
 	//PrettyPrintStruct(part_name)
+	fmt.Printf("\n\nWriting summary for %d scripts", len(mark_summary))
 	
 	file, err := os.OpenFile(outputCSV, os.O_RDWR|os.O_CREATE, os.ModePerm)
 	check(err)
@@ -415,12 +444,6 @@ func ValidateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 	err = w.Write([]string{""})
 	
 	// Prepare the headers
-	partnames := make([]string, 0, len(part_name))
-
-	for  _, value := range part_name {
-	   partnames = append(partnames, value)
-	}
-	sort.Strings(partnames)
 	csv_headers := append([]string{"Exam Number"}, partnames...)
 	csv_headers = append(csv_headers, []string{"Total", "Validation", "Unmarked Pages", "Bad Pages"}...)
 
@@ -447,25 +470,25 @@ func ValidateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 	check(err)
 	
 	// Add rows showing the item means
+	paper_mean := 0
+	num_scripts := 0
+	for _, tot := range row_totals {
+		paper_mean = paper_mean + tot
+		num_scripts++
+	}
 	row_means := []string{"mean:"}
 	row_means_pc := []string{"mean (%):"}
 	for _, val := range partnames {
 		mean_string := ""
 		mean_string_pc := ""
-		if _, ok := marks_awarded[val]; ok {
+		if _, ok := col_totals[val]; ok {
 			if marks_awarded_count[val] > 0 { // protect from division by 0
-				mean_string = fmt.Sprintf("%.2f", float64(marks_awarded[val])/float64(marks_awarded_count[val]))
-				mean_string_pc = fmt.Sprintf("%.1f", (100/float64(part_to_marks[val]))*float64(marks_awarded[val])/float64(marks_awarded_count[val]))
+				mean_string = fmt.Sprintf("%.2f", float64(col_totals[val])/float64(num_scripts))
+				mean_string_pc = fmt.Sprintf("%.1f", (100/float64(part_to_marks[val]))*float64(col_totals[val])/float64(num_scripts))
 			}
 		}
 		row_means = append(row_means, mean_string)
 		row_means_pc = append(row_means_pc, mean_string_pc)
-	}
-	paper_mean := 0
-	num_scripts := 0
-	for _, tot := range script_total {
-		paper_mean = paper_mean + tot
-		num_scripts++
 	}
 	if num_scripts > 0 {
 		row_means = append(row_means, fmt.Sprintf("%v", float64(paper_mean)/float64(num_scripts)))	
@@ -552,6 +575,19 @@ func keysAsCommaString(input_map map[string]bool) string {
         keys = append(keys, k)
     }
 	return sliceToCommaString(keys)
+}
+
+func sumOfMarks(mark_slice []string) int {
+	sum := 0
+    for _, mark := range mark_slice {
+        mark_int, err := strconv.Atoi(mark)
+		if err != nil {
+			fmt.Println("Error adding up marks:",mark_slice)
+			return 0
+		}
+		sum = sum + mark_int
+    }
+	return sum
 }
 
 func extractMarkerInitials(pdf_text map[int]string) string {

@@ -68,7 +68,7 @@ func main() {
 
 	// Now summarise the marks and perform validation checks
 	csv_path = fmt.Sprintf("%s/00_marks_summary-%s.csv", inputDir, report_time)
-	validation := pdf.ValidateMarking(form_values, parts, csv_path)
+	pdf.ValidateMarking(form_values, parts, csv_path)
 
 	os.Exit(1)
 
