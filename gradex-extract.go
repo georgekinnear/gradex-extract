@@ -175,7 +175,7 @@ func readFormsInDirectory(formsPath string, outputCSV string) []FormValues {
 			if proper_filename {
 				extracted_examno := filename_examno.FindStringSubmatch(f.Name())[1]
 				fmt.Println(extracted_examno)
-				vals_on_this_form := ReadFormFromPDF(path)
+				vals_on_this_form := ReadFormFromPDF(path, true)
 				// check that extracted_examno matches the one on the script!
 				if vals_on_this_form[0].ExamNumber != extracted_examno {
 					fmt.Println("Exam number mismatch: file",path,"has value",vals_on_this_form[0].ExamNumber)
@@ -202,7 +202,7 @@ func readFormsInDirectory(formsPath string, outputCSV string) []FormValues {
 	return form_vals
 }
 
-func ReadFormFromPDF(path string) []FormValues {
+func ReadFormFromPDF(path string, only_nonempty_values bool) []FormValues {
 
 	all_form_vals := []FormValues{}
 
@@ -227,14 +227,16 @@ func ReadFormFromPDF(path string) []FormValues {
 	
 	var form_values int
 	for key, val := range field_data {
-		// TODO - perhaps don't bother storing the empty values? consider moving all this inside the "if"
+		if hasContent(val) {
+			form_values++
+		} else if only_nonempty_values {
+			// If we only want to record nonempty values, we can skip this field
+			continue
+		}
 		this_form_entry := form_vals
 		this_form_entry.Field = key
 		this_form_entry.Value = val
 		all_form_vals = append(all_form_vals, this_form_entry)
-		if hasContent(val) {
-			form_values++
-		}
 	}
 	
 	fmt.Printf("%s has %d entries\n", form_vals.ExamNumber, form_values)
