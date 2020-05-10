@@ -74,8 +74,6 @@ type ScanResult struct {
 
 func main() {
 
-	multiMarker := flag.Bool("multimarker", false, "consolidate marks from multiple markers? (true/false)")
-
 	var inputDir string
 	flag.StringVar(&inputDir, "inputdir", "./", "path of the folder containing the PDF files to be processed (if in multimarker mode, will also check sub-folders with 'marker' in their name")
 	
@@ -91,13 +89,13 @@ func main() {
 		os.Exit(1)
 	}
 	
-	// Try to find parts_and_marks.csv
-	if *multiMarker && partsCSV == "../parts_and_marks.csv" {
-		// see if the default CSV value needs to be changed - in multimarker mode, we expect it to be in the current directory instead
+	// see if the default CSV value needs to be changed - in multimarker mode, we expect it to be in the inputDir itself
+	if partsCSV == "../parts_and_marks.csv" {
 		if _, err := os.Stat(partsCSV); os.IsNotExist(err) {
-			partsCSV = "parts_and_marks.csv"
+			partsCSV = inputDir+"/parts_and_marks.csv"
 		}
 	}
+	
 	if _, err := os.Stat(partsCSV); os.IsNotExist(err) {
 		fmt.Println("Could not locate", partsCSV)
 		os.Exit(1)
@@ -108,160 +106,31 @@ func main() {
 	
 	report_time := time.Now().Format("2006-01-02-15-04-05")
 
-	if *multiMarker {
-		
-		fmt.Println("Looking at input directory: ",inputDir)
-		
-		// Identify all the sub-directories in which marking is being done
-
-		//  -  ?? walk over the inputDir to find directories with "Marker" in the name
-
-		//  -  for each one, run readFormsInDirectory to get a csv+struct of the form values
-
-		// For each marker, produce validation of their marking
-
-		//  -  run validateMarking and save the resulting csv in their directory
-
-		// Collate the marks from all markers, and save the resulting csv in inputDir
-
-	} else {
-		// Only considering a single marker, and we expect inputDir to be the folder containing their marked PDFs
-		fmt.Println("Looking at input directory: ",inputDir)
-		
-		// Read the raw form values, and save them as a csv in the same folder as the scripts
-		csv_path := fmt.Sprintf("%s/01_raw_form_values-%s.csv", inputDir, report_time)
-		form_values := readFormsInDirectory(inputDir, csv_path)
-
-		// Now summarise the marks and perform validation checks
-		csv_path = fmt.Sprintf("%s/00_marks_summary-%s.csv", inputDir, report_time)
-		validation := validateMarking(form_values, parts, csv_path)
-		
-		fmt.Println(validation)
+	// Look at all PDFs in inputDir (including subdirectories)
+	fmt.Println("Looking at input directory: ",inputDir)
+	
+	// Read the raw form values, and save them as a csv
+	csv_path := fmt.Sprintf("%s/01_raw_form_values-%s.csv", inputDir, report_time)
+	form_values := readFormsInDirectory(inputDir, csv_path)
+	
+	// Check the scripts are all from the same course
+	coursecode := make(map[string]bool)
+	for _, entry := range form_values {
+		coursecode[entry.CourseCode] = true
 	}
+	if len(coursecode) != 1 {
+		fmt.Println("Error - found scripts from multiple courses:",coursecode)
+		os.Exit(1)
+	}
+
+	// Now summarise the marks and perform validation checks
+	csv_path = fmt.Sprintf("%s/00_marks_summary-%s.csv", inputDir, report_time)
+	validation := validateMarking(form_values, parts, csv_path)
+	
+	fmt.Println(validation)
 
 	os.Exit(1)
-/*
-	csvPath := os.Args[1]
-	inputDir := os.Args[2]
 
-	// Find all PDFs in the inputDir
-	err := ensureDir(inputDir)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	var inputPaths = []string{}
-	filepath.Walk(inputDir, func(path string, f os.FileInfo, _ error) error {
-		if !f.IsDir() {
-			if filepath.Ext(f.Name()) == ".pdf" {
-				inputPaths = append(inputPaths, f.Name())
-			}
-		}
-		return nil
-	})
-	fmt.Println("input files: ", len(inputPaths))
-
-	results := []ScanResult{}
-	var opt cmdOptions
-
-	files := make(map[string]map[int]string) //map of batchfilename->page->source files
-
-	textfields := make(map[string]map[string]string) //flat key-val for whole batch file
-
-	submissionsByOriginalFile := make(map[string]*parselearn.Submission)
-	submissionsByFile := make(map[string]*parselearn.Submission)
-
-	// iterate over the files in our list
-	for _, inputPath := range inputPaths {
-
-		// find out what original file each page came from
-		// for now - we assume one text per page, and one page per file
-		// because this is for interpreting montage output, only, at the moment
-
-		if strings.Compare(filepath.Ext(inputPath), ".pdf") == 0 {
-			texts, err := getText(inputPath, opt)
-			if err == nil {
-				files[inputPath] = texts
-			}
-
-			fields, err := mapPdfFieldData(inputPath)
-			if err == nil {
-				textfields[inputPath] = fields
-			}
-		}
-		if strings.Compare(filepath.Ext(inputPath), ".csv") == 0 {
-			if subs, err := readIngestReport(inputPath); err == nil {
-				for _, sub := range subs {
-					submissionsByFile[sub.Filename] = sub
-					submissionsByOriginalFile[sub.OriginalFilename] = sub
-				}
-			}
-		}
-	}
-
-	// Now reconcile fields .... so we can assign to source file (original doc before batching)
-
-	// map batchfilename->page->key->val
-	organisedFields := make(map[string]map[int]map[string]string)
-
-	for file, fields := range textfields {
-		perFileMap := make(map[int]map[string]string)
-
-		for key, val := range fields {
-			p, basekey := whatPageIsThisFrom(key)
-			if _, ok := perFileMap[p]; !ok { //init map for this page if not present
-				perFileMap[p] = make(map[string]string)
-			}
-			perFileMap[p][basekey] = val
-		}
-
-		organisedFields[file] = perFileMap
-
-	}
-
-	// join the two maps to make a per-source-file report on results
-	// abracadabra
-
-	// we go by batchfile, and page, same in both maps, unless corrupt files
-	// so either or ...
-	for batchfile, pageToSourceFileMap := range files {
-
-		for page, sourcefile := range pageToSourceFileMap {
-
-			if _, ok := organisedFields[batchfile][page]; ok {
-				organisedFields[batchfile][page]["SourceFile"] = sourcefile
-
-				// find original submission details
-				var submission *parselearn.Submission
-
-				if sub, ok := submissionsByFile[sourcefile]; ok {
-					submission = sub
-				} else if sub, ok := submissionsByOriginalFile[sourcefile]; ok {
-					submission = sub
-				}
-
-				thisScan := ScanResult{}
-				if submission != nil {
-					thisScan.Submission = *submission
-				}
-				thisScan.BatchFile = batchfile
-				thisScan.BatchPage = page + 1 //humans often start thinking at page 1
-
-				insertCheckReport(&thisScan, organisedFields[batchfile][page])
-
-				results = append(results, thisScan) //ScanResult{Submission: *submission})
-			}
-		}
-	}
-
-	PrettyPrintStruct(results)
-	err = WriteResultsToCSV(results, csvPath)
-	if err != nil {
-		fmt.Println(err)
-		os.Exit(1)
-	}
-	
-*/
 }
 
 func check(e error) {
@@ -372,7 +241,6 @@ func readFormFromPDF(path string) []FormValues {
 func validateMarking(form_values []FormValues, parts []*PaperStructure, outputCSV string) (error) {
 	
 	// understand the parts structure
-	// NB - not really necessary, maybe can just do parts[3].Mark where 3 = the integer used in the PDF form ID
 	marks_available := make(map[int]int)
 	part_name := make(map[int]string)
 	part_to_marks := make(map[string]int)
@@ -385,6 +253,9 @@ func validateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 	}
 	fmt.Println(marks_available,"\n", part_name)
 	
+	coursecode := ""
+	markers := make(map[string]bool)
+	
 	// Set up maps to store data
 	mark_details := make(map[string]map[string][]string) // mark_details[ExamNo][part] = [4,5,6]
 	script_total := make(map[string]int) // script_total[ExamNo] = 7
@@ -396,6 +267,9 @@ func validateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 	
 	for _, entry := range form_values {
 		ExamNo := entry.ExamNumber
+		coursecode = entry.CourseCode
+		markers[entry.Marker] = true
+		
 		if !strings.Contains(entry.Field, "page") {
 			continue // quietly skip fields that don't have a page
 		}
@@ -460,15 +334,10 @@ func validateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 		
 	}
 	
-	fmt.Println(marks_awarded)
-	
 	// Carry out further validation of the marks
 	// Also prepare the mark cells of the CSV
 	mark_summary := make(map[string]map[string]string) // mark_summary[ExamNo][part] = "4+5" or "4" or "2.5"
 	for ExamNo, marks_by_part := range mark_details {
-		
-		fmt.Println(ExamNo)
-		PrettyPrintStruct(marks_by_part)
 		
 		// Prepare the nested maps to receive values
 		if validation[ExamNo] == nil {
@@ -539,42 +408,30 @@ func validateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 		sort.Ints(bad_pages[ExamNo])
 		mark_summary[ExamNo]["Bad Pages"] = strings.Trim(strings.Join(strings.Fields(fmt.Sprint(bad_pages[ExamNo])), ", "), "[]") // https://stackoverflow.com/a/37533144
 		
-		PrettyPrintStruct(mark_summary[ExamNo])
-		PrettyPrintStruct(validation[ExamNo])
+		//PrettyPrintStruct(mark_summary[ExamNo])
+		//PrettyPrintStruct(validation[ExamNo])
 		
 	}
 	
-	/* 
+	/*=======================================================================
 	|   Produce the CSV output
-	*/
+	=======================================================================*/
 	
 	fmt.Println("MARK SUMMARY")
 	PrettyPrintStruct(mark_summary)
-	PrettyPrintStruct(part_name)
+	//PrettyPrintStruct(part_name)
 	
 	file, err := os.OpenFile(outputCSV, os.O_RDWR|os.O_CREATE, os.ModePerm)
 	check(err)
 	defer file.Close()
 	w := csv.NewWriter(file)
 	
-	// First come up with the csv_headers - have to work pretty hard to get that as a slice in the right order
-/*	keys := make([]string, 0, len(mark_summary))
-	values := make([]map[string]string, 0, len(mark_summary))
-	for k, v := range mark_summary {
-		keys = append(keys, k)
-		values = append(values, v)
-	}	
-	csv_headers := []string{}
-	for k, _ := range values[0] {
-		if strings.Contains(k, "Page") { continue } // Manually add those to the end
-		csv_headers = append(csv_headers, k)
-	}
-	sort.Strings(csv_headers)
-	csv_headers = append([]string{"Exam Number"}, csv_headers...)
-	csv_headers = append(csv_headers, []string{"Unmarked Pages", "Bad Pages"}...)
+	// Basic info about the marking
+	err = w.Write([]string{"Exam: ",coursecode})
+	err = w.Write([]string{"Marker: ",keysAsCommaString(markers)})
+	err = w.Write([]string{""})
 	
-	
-*/
+	// Prepare the headers
 	partnames := make([]string, 0, len(part_name))
 
 	for  _, value := range part_name {
@@ -606,16 +463,20 @@ func validateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 	err = w.Write(row_outof)
 	check(err)
 	
-	// Add a row showing the item means
+	// Add rows showing the item means
 	row_means := []string{"mean:"}
-	for _, val := range csv_headers {
+	row_means_pc := []string{"mean (%):"}
+	for _, val := range partnames {
+		mean_string := ""
+		mean_string_pc := ""
 		if _, ok := marks_awarded[val]; ok {
-			mean_string := ""
 			if marks_awarded_count[val] > 0 { // protect from division by 0
 				mean_string = fmt.Sprintf("%.2f", float64(marks_awarded[val])/float64(marks_awarded_count[val]))
+				mean_string_pc = fmt.Sprintf("%.1f", (100/float64(part_to_marks[val]))*float64(marks_awarded[val])/float64(marks_awarded_count[val]))
 			}
-			row_means = append(row_means, mean_string)
 		}
+		row_means = append(row_means, mean_string)
+		row_means_pc = append(row_means_pc, mean_string_pc)
 	}
 	paper_mean := 0
 	num_scripts := 0
@@ -625,11 +486,14 @@ func validateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 	}
 	if num_scripts > 0 {
 		row_means = append(row_means, fmt.Sprintf("%v", float64(paper_mean)/float64(num_scripts)))	
+		row_means_pc = append(row_means_pc, fmt.Sprintf("%v", (100/float64(paper_outof))*float64(paper_mean)/float64(num_scripts)))	
 	}
 	err = w.Write(row_means)
 	check(err)
+	err = w.Write(row_means_pc)
+	check(err)
 	
-	// Separate the Validation/Complete blocsk and sort both lists of students by Exam Number
+	// Separate the Validation/Complete/Unmarked blocks and sort these lists of students by Exam Number
 	student_records_invalid := []string{}
 	student_records_valid := []string{}
 	student_records_unmarked := []string{}
@@ -647,8 +511,7 @@ func validateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 	sort.Strings(student_records_valid)
 	sort.Strings(student_records_unmarked)
 
-	// Print each row for the invalid records - again, have to work hard
-	// to make sure the slice for each student is in the correct order
+	// Print each row for the invalid records - range over the csv_headers to look up the correct value for each column
 	err = w.Write([]string{""}) // blank row
 	err = w.Write([]string{"Validation problems ("+strconv.Itoa(len(student_records_invalid))+" scripts):"})
 	check(err)
@@ -681,8 +544,6 @@ func validateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 		check(err)
 	}
 	
-	// TODO - now list all the "yet to be marked" ones
-	
 	// Now do the unmarked ones
 	err = w.Write([]string{""}) // blank row
 	err = w.Write([]string{"Yet to be marked ("+strconv.Itoa(len(student_records_unmarked))+" scripts):"})
@@ -692,29 +553,22 @@ func validateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 		err := w.Write(record)
 		check(err)
 	}
-/*	
-	// Now loop through mark_summary and print out each row - again, have to work hard
-	// to make sure the slice for each student is in the correct order
-	for ExamNo, recordset := range mark_summary {
-		record := []string{fmt.Sprintf("%v", ExamNo)}
-		for _, val := range csv_headers {
-			if val == "Exam Number" { continue }
-			record = append(record, fmt.Sprintf("%v", recordset[val]))
-		}
-		err := w.Write(record)
-		check(err)
-	}
-*/
+
 	w.Flush()
 	
-	
-	
-	//fmt.Println(mark_summary)
-	//PrettyPrintStruct(mark_details)
-	//PrettyPrintStruct(validation)
-	//PrettyPrintStruct(marks_on_page)
-	
 	return nil
+}
+
+func sliceToCommaString(input_slice []string) string {
+	return strings.Trim(strings.Join(strings.Fields(fmt.Sprint(input_slice)), ", "), "[]") // https://stackoverflow.com/a/37533144
+}
+
+func keysAsCommaString(input_map map[string]bool) string {
+	keys := make([]string, 0, len(input_map))
+    for k, _ := range input_map {
+        keys = append(keys, k)
+    }
+	return sliceToCommaString(keys)
 }
 
 func extractMarkerInitials(pdf_text map[int]string) string {
@@ -805,53 +659,7 @@ func insertCheckReport(scan *ScanResult, fields map[string]string) {
 
 }
 
-//	        "filename-no-course": "x",
-//			"filename-no-id": "x",
-//			"filename-perfect": "",
-//			"filename-verbose": "x",
-//			"heading-anonymity-broken": "",
-//			"heading-comment-1": "",
-//			"heading-comment-2": "",
-//			"heading-no-exam-number": "",
-//			"heading-no-line": "",
-//			"heading-no-question": "",
-//			"heading-perfect": "x",
-//			"heading-verbose": "",
-//			"scan-broken": "",
-//			"scan-comment-1": "",
-//			"scan-comment-2": "",
-//			"scan-contrast": "",
-//			"scan-faint": "",
-//			"scan-incomplete": "",
-//			"scan-perfect": "x",
-//			"scan-rotated": ""
-//		},
-//
-//type ScanResult struct {
-//	ScanPerfect            bool   `csv:"ScanPerfect"`
-//	ScanRoated             bool   `csv:"ScanRotated"`
-//	ScanContrast           bool   `csv:"ScanContrast"`
-//	ScanFaint              bool   `csv:"ScanFaint"`
-//	ScanIncomplete         bool   `csv:"ScanIncomplete"`
-//	ScanBroken             bool   `csv:"ScanBroken"`
-//	ScanComment1           string `csv:"ScanComment1"`
-//	ScanComment2           string `csv:"ScanComment2"`
-//	HeadingPerfect         bool   `csv:"HeadingPerfect"`
-//	HeadingVerbose         bool   `csv:"HeadingVerbose"`
-//	HeadingNoLine          bool   `csv:"HeadingNoLine"`
-//	HeadingNoQuestion      bool   `csv:"HeadingNoQuestion"`
-//	HeadingNoExamNumber    bool   `csv:"HeadingNoExamNumber"`
-//	HeadingAnonymityBroken bool   `csv:"HeadingAnonymityBroken"`
-//	HeadingComment1        string `csv:"HeadingComment1"`
-//	HeadingComment2        string `csv:"HeadingComment2"`
-//	FilenamePerfect        bool   `csv:"FilenamePerfect"`
-//	FilenameVerbose        bool   `csv:"FilenameVerbose"`
-//	FilenameNoCourse       bool   `csv:"FilenameNoCourse"`
-//	FilenameNoID           bool   `csv:"FilenameNoID"`
-//	InputFile              string `csv:"InputFile"`
-//	Submission             parselearn.Submission
-//}
-//
+
 
 func readIngestReport(inputPath string) ([]*parselearn.Submission, error) {
 	subs := []*parselearn.Submission{}
