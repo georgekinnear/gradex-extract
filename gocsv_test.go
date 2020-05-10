@@ -1,4 +1,4 @@
-package gradexextract
+package main
 
 import (
 	"bufio"
