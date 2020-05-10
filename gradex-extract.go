@@ -202,7 +202,7 @@ func readFormsInDirectory(formsPath string, outputCSV string) []FormValues {
 	return form_vals
 }
 
-func ReadFormFromPDF(path string, only_nonempty_values bool) []FormValues {
+func ReadFormFromPDF(path string, include_nonempty_values bool) []FormValues {
 
 	all_form_vals := []FormValues{}
 
@@ -229,7 +229,7 @@ func ReadFormFromPDF(path string, only_nonempty_values bool) []FormValues {
 	for key, val := range field_data {
 		if hasContent(val) {
 			form_values++
-		} else if only_nonempty_values {
+		} else if !include_nonempty_values {
 			// If we only want to record nonempty values, we can skip this field
 			continue
 		}
