@@ -29,7 +29,9 @@ type FormValues struct {
 	CourseCode string `csv:"CourseCode"`
 	Marker     string `csv:"Marker"`
 	ExamNumber string `csv:"ExamNumber"`
+	Page	   int	  `csv:"Page"`
 	Field      string `csv:"Field"`
+	FieldName  string `csv:"FieldName"`
 	Value      string `csv:"Value"`
 }
 
@@ -167,13 +169,24 @@ func ReadFormFromPDF(path string, include_nonempty_values bool) []FormValues {
 			// If we only want to record nonempty values, we can skip this field
 			continue
 		}
+		if !strings.Contains(key, "page") {
+			continue // quietly skip fields that don't have a page
+		}
 		this_form_entry := form_vals
 		this_form_entry.Field = key
 		this_form_entry.Value = val
+		//fmt.Println(key)
+		//page, fieldname := whatPageIsThisFrom(key)
+		//fmt.Println(key, page, fieldname)
+		this_form_entry.Page, this_form_entry.FieldName = whatPageIsThisFrom(key)
+		page_marker := whoMarkedThisPage(key)
+		if page_marker != "" {
+			this_form_entry.Marker = page_marker
+		}
 		all_form_vals = append(all_form_vals, this_form_entry)
 	}
 	
-	fmt.Printf(" - Extracted %d entries for %s\n", form_values, form_vals.ExamNumber)
+	fmt.Printf(" - Extracted %d entries for %s (%s)\n", form_values, form_vals.ExamNumber, path)
 	//PrettyPrintStruct(all_form_vals)
 	
 	return all_form_vals
@@ -727,6 +740,18 @@ func whatPageIsThisFrom(key string) (int, string) {
 		return -1, ""
 	}
 	return parsed_pageno + 1, parsed_key[2] // the basekey is the 2nd submatch
+
+}
+
+func whoMarkedThisPage(key string) (string) {
+
+	// Pick out marker https://regex101.com/r/vGyDbg/2
+	parse_field_name, _ := regexp.Compile("marker_([a-zA-Z]+).*")
+	parsed_key := parse_field_name.FindStringSubmatch(key)
+	if len(parsed_key) == 0 {
+		return ""
+	}
+	return parsed_key[1]
 
 }
 
