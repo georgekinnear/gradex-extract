@@ -18,6 +18,7 @@ import (
 	"strings"
 	"regexp"
 	"sort"
+	"bytes"
 
 	"github.com/gocarina/gocsv"
 	"github.com/timdrysdale/parselearn"
@@ -279,6 +280,10 @@ func ValidateMarking(form_values []FormValues, parts []*PaperStructure, outputCS
 			
 			// Get the integer value
 			var mark_awarded int
+			entry.Value = string(bytes.Trim([]byte(entry.Value), "\xfe\xf0\x00")) // fix bug with Edge prepending values with þÿ
+			entry.Value = strings.TrimSpace(entry.Value)
+			if len(entry.Value) == 0 { continue }
+			
 			if intval, err := strconv.Atoi(entry.Value); err == nil {
 				mark_awarded = intval
 				marks_awarded[partname] = marks_awarded[partname] + intval
